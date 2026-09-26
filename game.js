@@ -376,19 +376,19 @@ function createEmbers() {
 }
 
 const modelFiles = {
-  board: 'models 3d glb/board.glb',
-  p_w: 'models 3d glb/pawn_w.glb',
-  p_b: 'models 3d glb/pawn_b.glb',
-  r_w: 'models 3d glb/rook_w.glb',
-  r_b: 'models 3d glb/rook_b.glb',
-  n_w: 'models 3d glb/knight_w.glb',
-  n_b: 'models 3d glb/knight_b.glb',
-  b_w: 'models 3d glb/bishop_w.glb',
-  b_b: 'models 3d glb/bishop_b.glb',
-  q_w: 'models 3d glb/queen_w.glb',
-  q_b: 'models 3d glb/queen_b.glb',
-  k_w: 'models 3d glb/king_w.glb',
-  k_b: 'models 3d glb/king_b.glb',
+  board: 'models 3d glb/board.glb?v=bdca79427166',
+  p_w: 'models 3d glb/pawn_w.glb?v=2fef41c47ab0',
+  p_b: 'models 3d glb/pawn_b.glb?v=29ba8ef32740',
+  r_w: 'models 3d glb/rook_w.glb?v=9794be1bdf9b',
+  r_b: 'models 3d glb/rook_b.glb?v=31615dd178ea',
+  n_w: 'models 3d glb/knight_w.glb?v=db7c6d42cb90',
+  n_b: 'models 3d glb/knight_b.glb?v=4190996d62fa',
+  b_w: 'models 3d glb/bishop_w.glb?v=d9130ec31b82',
+  b_b: 'models 3d glb/bishop_b.glb?v=3d4142606a3a',
+  q_w: 'models 3d glb/queen_w.glb?v=4a34181da908',
+  q_b: 'models 3d glb/queen_b.glb?v=1e82478091be',
+  k_w: 'models 3d glb/king_w.glb?v=0de23f17e5bf',
+  k_b: 'models 3d glb/king_b.glb?v=8a7c565f7c78',
 };
 
 function loadAllModels() {
@@ -416,7 +416,7 @@ function loadAllModels() {
         if (loadingText) loadingText.textContent = `Đang tải mô hình 3D... (${loaded}/${total})`;
 
         if (loaded === total) {
-          setTimeout(onModelsReady, 400);
+          onModelsReady();
         }
       },
       undefined,
