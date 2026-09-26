@@ -715,6 +715,55 @@
       }
       .sidebar { max-height: 240px; }
     }
+
+    @media (max-width: 600px) {
+      body { overflow: auto; min-height: 100dvh; height: auto; }
+      #ui-overlay {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 100dvh;
+        width: 100%;
+        padding: 8px;
+        gap: 8px;
+        overflow: visible;
+      }
+      header {
+        position: sticky;
+        top: 8px;
+        z-index: 20;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px;
+        padding: 8px;
+      }
+      .title-group { min-width: 0; gap: 6px; }
+      .title-group h1 { font-size: 12px; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .turn-badge { display: none; }
+      .clock-group { grid-column: 1 / -1; justify-content: center; gap: 4px; }
+      .chess-clock { padding: 4px 7px; font-size: 11px; }
+      .btn-bar { justify-content: flex-end; gap: 4px; }
+      .btn-bar button { padding: 6px 7px; font-size: 10px; }
+      .btn-bar #btn-sound { display: none; }
+      .sidebar {
+        width: 100%;
+        min-width: 0;
+        max-height: none;
+        padding: 10px;
+        gap: 8px;
+        overflow: visible;
+      }
+      .sidebar:first-of-type { order: 1; }
+      .sidebar:last-of-type { order: 2; }
+      .mode-btn { min-height: 38px; font-size: 10px; }
+      button, select, input { min-height: 38px; }
+      .camera-presets { grid-template-columns: repeat(3, 1fr); }
+      .emotes-bar { grid-template-columns: repeat(4, 1fr); }
+      .move-history { max-height: 180px; }
+      #chat-messages { max-height: 180px; }
+      #loading-screen { padding: 20px; }
+      .progress-bar-wrap { width: min(280px, 80vw); }
+    }
   </style>
 
   <!-- Libraries -->
