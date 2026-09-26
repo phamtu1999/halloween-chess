@@ -1,4 +1,10 @@
 {
+  "routes": [
+    {
+      "src": "/(?:server\\.py|start_game\\.sh|requirements\\.txt|README\\.md|config\\.js|.*\\.(?:blend|blend1|blend2|pyc|log))$",
+      "status": 404
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

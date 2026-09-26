@@ -262,7 +262,7 @@ function initScene() {
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -293,8 +293,8 @@ function initScene() {
   const torchKey = new THREE.DirectionalLight(0xff7b1a, 2.2);
   torchKey.position.set(4, 6, 5);
   torchKey.castShadow = true;
-  torchKey.shadow.mapSize.width = 2048;
-  torchKey.shadow.mapSize.height = 2048;
+  torchKey.shadow.mapSize.width = 1024;
+  torchKey.shadow.mapSize.height = 1024;
   scene.add(torchKey);
 
   const moonFill = new THREE.DirectionalLight(0x8a2be2, 1.4);
