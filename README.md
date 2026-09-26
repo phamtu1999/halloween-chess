@@ -1,10 +1,10 @@
 # 🎃 Halloween 3D Chess — Cờ Vua Ma Quái 3D
 
-Một tựa game cờ vua 3D thời gian thực mang phong cách Gothic Dark Fantasy ma mị đêm Halloween. Game được xây dựng hoàn toàn từ các mô hình 3D Blender tùy chỉnh, kết hợp đồ họa WebGL với Three.js, engine logic Chess.js và hệ thống máy chủ mạng WebSocket (Python).
+Một tựa game cờ vua 3D thời gian thực mang phong cách Gothic Dark Fantasy ma mị đêm Halloween. Game được xây dựng 100% Serverless, chạy trực tiếp trên trình duyệt hoặc deploy lên Vercel chỉ với 1 click.
 
-![Halloween Chess 3D Preview](https://img.shields.io/badge/Three.js-r128-orange?style=for-the-badge&logo=threedotjs)
-![Python](https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python)
-![WebSockets](https://img.shields.io/badge/WebSockets-Real--Time-green?style=for-the-badge)
+![Three.js](https://img.shields.io/badge/Three.js-r128-orange?style=for-the-badge&logo=threedotjs)
+![WebRTC](https://img.shields.io/badge/WebRTC-PeerJS%20P2P-blue?style=for-the-badge)
+![Vercel](https://img.shields.io/badge/Deploy-Vercel%20Ready-black?style=for-the-badge&logo=vercel)
 ![Blender](https://img.shields.io/badge/Blender-Custom%203D-EA7600?style=for-the-badge&logo=blender)
 
 ---
@@ -26,10 +26,10 @@ Một tựa game cờ vua 3D thời gian thực mang phong cách Gothic Dark Fan
 - **Chọn phe chủ động:** Người chơi có thể cầm quân **⚪ Trắng** (đi trước) hoặc **⚫ Đen** (AI đi trước, bàn cờ tự xoay góc nhìn).
 - **Công cụ hỗ trợ:** Nút **💡 Gợi ý nước đi** (Hint) và **↩ Đi lại** (Undo).
 
-### 3. 🌐 Đấu Online Thời Gian Thực (Multiplayer WebSocket)
-- **Tìm trận nhanh (Quick Match):** Ghép đôi tự động giữa 2 người chơi online.
-- **Tạo & Tham gia phòng kín (Custom Rooms):** 
-  - Mời bạn bè với **1-click link mời** dạng `http://localhost:8080/?room=HLW-XXXX`.
+### 3. 🌐 Đấu Online Serverless (WebRTC PeerJS P2P)
+- **100% Serverless:** Không cần backend server, 2 trình duyệt kết nối trực tiếp với nhau (Peer-to-Peer).
+- **Tạo & Tham gia phòng (Custom Rooms):** 
+  - Mời bạn bè với **1-click link mời** dạng `https://your-domain.vercel.app/?room=XXXX`.
   - Hộp thoại nhập mã phòng kính mờ Gothic chuyên nghiệp (hỗ trợ phím Enter / Esc).
 - **Đồng hồ thi đấu (Chess Clocks):** Tùy chọn 3 phút (Blitz), 5 phút (Rapid) hoặc 10 phút.
 - **Trò chuyện & Cảm xúc 3D:** Khung chat trực tiếp và thả cảm xúc 🎃 👻 💀 🔥 bay lơ lửng trên không gian 3D.
@@ -59,51 +59,25 @@ halloween chess/
 │   ├── king_w.glb / king_b.glb    # Vua Trắng / Đen
 │   └── halloween_chess_full.glb   # File tổng hợp toàn bộ bàn cờ
 ├── index.html                     # Giao diện UI/UX Gothic Dark Glassmorphism
-├── game.js                        # Engine WebGL Three.js, Chess.js, WebSocket & AI
-├── server.py                      # Server Python HTTP (8080) + WebSocket (8081)
-├── start_game.sh                  # Script khởi chạy 1 chạm cho Linux / Mac
+├── game.js                        # Engine WebGL Three.js, Chess.js, PeerJS P2P & AI
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 🚀 Hướng dẫn cài đặt & Khởi chạy
+## 🚀 Hướng dẫn Deploy lên Vercel (1-Click)
 
-### Yêu cầu môi trường:
-- **Python 3.8+**
-- Thư viện Python: `websockets`
+1. Đăng nhập [Vercel](https://vercel.com) bằng GitHub.
+2. Chọn **Add New Project** ➔ Chọn repo `phamtu1999/halloween-chess`.
+3. Giữ nguyên toàn bộ cấu hình mặc định (Framework Preset: **Other**, Root: `./`).
+4. Nhấn **Deploy**!
 
-### 1. Cài đặt thư viện:
-```bash
-pip install websockets
-```
-
-### 2. Khởi chạy:
-#### Cách 1: Chạy bằng script 1-chạm (Linux / macOS):
-```bash
-chmod +x start_game.sh
-./start_game.sh
-```
-
-#### Cách 2: Chạy trực tiếp bằng Python:
-```bash
-python3 server.py
-```
-
-Sau đó mở trình duyệt truy cập: **`http://localhost:8080`**
-
----
-
-## 🎮 Hướng dẫn điều khiển
-- **Chuột trái:** Nhấp chọn quân cờ và click ô đích có dấu tròn phát sáng để di chuyển.
-- **Giữ chuột trái & kéo:** Xoay tự do góc nhìn 3D (OrbitControls).
-- **Cuộn chuột:** Thu phóng phóng to / thu nhỏ.
-- **Giữ chuột phải & kéo:** Di chuyển vùng nhìn (Pan).
+Trang web sẽ lập tức hoạt động đầy đủ cả **Đấu với máy AI** lẫn **Đấu Online qua mạng P2P** mà không cần cấu hình thêm bất kỳ server nào!
 
 ---
 
 ## 📜 Giấy phép & Tác giả
 - Phát triển bởi **[phamtu1999](https://github.com/phamtu1999)**
-- Thiết kế 3D & Lập trình WebGL Three.js / WebSocket.
+- Thiết kế 3D & Lập trình WebGL Three.js / WebRTC P2P.
 - Giấy phép: MIT License.

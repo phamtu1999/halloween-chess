@@ -10,13 +10,16 @@ let soundEnabled = true;
 let isAnimating = false;
 let pendingPromotion = null;
 
-// Online Multiplayer state via WebSocket
-let ws = null;
+// Online Multiplayer state via WebRTC P2P (PeerJS - 100% Serverless)
+let peer = null;
+let peerConn = null;
+let isHost = false;
+let clockInterval = null;
+let hostColorPref = 'random';
 let currentRoomId = null;
 let myOnlineColor = 'w'; // 'w' or 'b'
 let whitePlayerName = 'Trắng';
 let blackPlayerName = 'Đen';
-let isMyTurnOnline = false;
 let onlineActive = false;
 
 // Timers
@@ -247,7 +250,6 @@ function initScene() {
   scene.fog = new THREE.FogExp2(0x0a0610, 0.05);
 
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-  setCameraPreset('persp');
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -263,7 +265,9 @@ function initScene() {
   controls.maxPolarAngle = Math.PI / 2 - 0.05;
   controls.minDistance = 2.5;
   controls.maxDistance = 15;
-  controls.target.set(0, 0.3, 0);
+  controls.target.set(0, 0.2, 0);
+
+  setCameraPreset('persp');
 
   boardGroup = new THREE.Group();
   piecesGroup = new THREE.Group();
@@ -572,13 +576,25 @@ function createCaptureMarker(pos, color) {
 
 function executeMove(from, to, promo = 'q', broadcast = false) {
   const pieceObj = pieceInstances[from];
-  const targetObj = pieceInstances[to];
+  let victimSquare = to;
   const moveResult = chess.move({ from, to, promotion: promo });
 
   if (!moveResult) return;
 
-  if (broadcast && gameMode === 'online' && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(jsonStr({ action: 'move', from, to, promo }));
+  if (moveResult.flags.includes('e')) {
+    victimSquare = to[0] + from[1];
+  }
+  const victimObj = pieceInstances[victimSquare];
+
+  if (broadcast && gameMode === 'online') {
+    sendPeerMsg({
+      type: 'move',
+      from,
+      to,
+      promo,
+      white_time: whiteRemaining,
+      black_time: blackRemaining
+    });
   }
 
   isAnimating = true;
@@ -591,7 +607,10 @@ function executeMove(from, to, promo = 'q', broadcast = false) {
 
   if (moveResult.captured) {
     playSound('capture');
-    if (targetObj) animateCapture(targetObj);
+    if (victimObj) {
+      delete pieceInstances[victimSquare];
+      animateCapture(victimObj);
+    }
   } else {
     playSound('move');
   }
@@ -859,8 +878,8 @@ document.getElementById('banner-ok-btn').onclick = () => {
 
 document.getElementById('banner-rematch-btn').onclick = () => {
   document.getElementById('banner-modal').style.display = 'none';
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(jsonStr({ action: 'rematch' }));
+  if (gameMode === 'online') {
+    sendPeerMsg({ type: 'rematch_request' });
     addChatMessage('Hệ thống', 'Đã gửi yêu cầu tái đấu...', 'sys');
     showToast('Đã gửi lời mời tái đấu tới đối thủ!', 'info', '🔄');
   }
@@ -940,8 +959,16 @@ function updateUI() {
   document.getElementById('captured-black').textContent = capB || '—';
 }
 
-// ── WebSocket Multiplayer Engine ─────────────────────────────────────────────
-function jsonStr(obj) { return JSON.stringify(obj); }
+// ── WebRTC PeerJS Multiplayer Engine (100% Serverless / Vercel-Ready) ───────
+const PEER_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+  }
+};
 
 function getMyPlayerName() {
   const input = document.getElementById('input-player-name');
@@ -951,88 +978,226 @@ function getMyPlayerName() {
   return name;
 }
 
-function connectWebSocket(callback) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    if (callback) callback();
-    return;
+function sendPeerMsg(obj) {
+  if (peerConn && peerConn.open) {
+    peerConn.send(obj);
   }
+}
 
-  const wsUrl = `ws://${window.location.hostname || 'localhost'}:8081`;
-  ws = new WebSocket(wsUrl);
-
-  updateOnlineBadge('🟡 Đang kết nối tới máy chủ...');
-
-  ws.onopen = () => {
-    console.log('Connected to WebSocket server!');
-    updateOnlineBadge('🟢 Máy chủ sẵn sàng');
-    if (callback) callback();
-  };
-
-  ws.onmessage = async (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      await handleServerMessage(data);
-    } catch (err) {
-      console.error(err);
+function startClockTimer() {
+  stopClockTimer();
+  clockInterval = setInterval(() => {
+    if (!onlineActive || chess.game_over()) return;
+    const currentTurn = chess.turn();
+    if (currentTurn === 'w') {
+      whiteRemaining = Math.max(0, whiteRemaining - 1);
+      if (whiteRemaining <= 0) {
+        handleTimeout('b');
+      }
+    } else {
+      blackRemaining = Math.max(0, blackRemaining - 1);
+      if (blackRemaining <= 0) {
+        handleTimeout('w');
+      }
     }
-  };
+    updateUI();
 
-  ws.onclose = () => {
-    updateOnlineBadge('🔴 Mất kết nối máy chủ');
-    onlineActive = false;
-  };
+    // If host, sync clocks to guest every second
+    if (isHost && peerConn && peerConn.open) {
+      sendPeerMsg({
+        type: 'time_sync',
+        white_time: whiteRemaining,
+        black_time: blackRemaining
+      });
+    }
+  }, 1000);
+}
 
-  ws.onerror = () => {
-    updateOnlineBadge('🔴 Không thể kết nối tới máy chủ');
+function stopClockTimer() {
+  if (clockInterval) {
+    clearInterval(clockInterval);
+    clockInterval = null;
+  }
+}
+
+function handleTimeout(winnerColor) {
+  onlineActive = false;
+  stopClockTimer();
+  const winName = (winnerColor === 'w') ? whitePlayerName : blackPlayerName;
+  const desc = `${winName} chiến thắng do đối thủ hết giờ!`;
+  showBanner('HẾT GIỜ!', desc, true);
+  addChatMessage('Hệ thống', desc, 'sys');
+  if (isHost) {
+    sendPeerMsg({ type: 'game_over', reason: 'timeout', winner: winnerColor });
+  }
+}
+
+function getPeerRoomInfo(rawCode) {
+  let clean = (rawCode || '').trim().toUpperCase().replace(/^HLW-?/i, '').replace(/[^A-Z0-9]/g, '');
+  if (!clean) clean = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return {
+    displayCode: `HLW-${clean}`,
+    peerId: `hlw-chess-room-${clean.toLowerCase()}`,
+    codeOnly: clean
   };
 }
 
-async function handleServerMessage(data) {
+function createRoomP2P(timeCtl, colorPref) {
+  stopClockTimer();
+  if (peerConn) { try { peerConn.close(); } catch(e){} peerConn = null; }
+  if (peer) { try { peer.destroy(); } catch(e){} peer = null; }
+
+  timeControl = timeCtl;
+  whiteRemaining = timeControl;
+  blackRemaining = timeControl;
+  hostColorPref = colorPref;
+  isHost = true;
+
+  const roomInfo = getPeerRoomInfo(Math.random().toString(36).substring(2, 6).toUpperCase());
+  currentRoomId = roomInfo.displayCode;
+
+  updateOnlineBadge(`🟡 Đang mở phòng ${currentRoomId}...`);
+
+  try {
+    peer = new Peer(roomInfo.peerId, PEER_CONFIG);
+
+    peer.on('open', (id) => {
+      console.log('PeerJS Host open:', id);
+      document.getElementById('display-room-id').textContent = currentRoomId;
+      document.getElementById('room-info-box').style.display = 'block';
+      updateOnlineBadge(`🟡 Phòng ${currentRoomId} (Chờ đối thủ)`);
+      addChatMessage('Hệ thống', `Đã mở phòng ${currentRoomId}. Hãy gửi mã hoặc copy link cho bạn bè!`, 'sys');
+      showToast(`Đã tạo phòng ${currentRoomId}!`, 'success', '🏰');
+    });
+
+    peer.on('connection', (conn) => {
+      console.log('Incoming guest connection...');
+      peerConn = conn;
+      setupPeerConnectionHandlers(conn);
+    });
+
+    peer.on('error', (err) => {
+      console.error('PeerJS Host error:', err);
+      if (err.type === 'unavailable-id') {
+        createRoomP2P(timeCtl, colorPref);
+      } else {
+        showToast('Lỗi P2P: ' + (err.type || err.message), 'error', '⚠️');
+        updateOnlineBadge('🔴 Không thể mở phòng P2P');
+      }
+    });
+  } catch(err) {
+    console.error(err);
+  }
+}
+
+function joinRoomP2P(roomCode) {
+  stopClockTimer();
+  if (peerConn) { try { peerConn.close(); } catch(e){} peerConn = null; }
+  if (peer) { try { peer.destroy(); } catch(e){} peer = null; }
+
+  isHost = false;
+  const roomInfo = getPeerRoomInfo(roomCode);
+  currentRoomId = roomInfo.displayCode;
+  const hostPeerId = roomInfo.peerId;
+
+  updateOnlineBadge(`🟡 Đang kết nối tới ${currentRoomId}...`);
+  showToast(`Đang kết nối vào phòng ${currentRoomId}...`, 'info', '⏳');
+
+  try {
+    peer = new Peer(PEER_CONFIG);
+
+    peer.on('open', (id) => {
+      console.log('Guest peer ready with ID:', id, 'Connecting to:', hostPeerId);
+      const conn = peer.connect(hostPeerId, { reliable: true });
+      peerConn = conn;
+      setupPeerConnectionHandlers(conn);
+    });
+
+    peer.on('error', (err) => {
+      console.error('Guest Peer error:', err);
+      showToast('Không tìm thấy phòng hoặc phòng đã đóng!', 'error', '❌');
+      updateOnlineBadge('🔴 Không tìm thấy phòng: ' + currentRoomId);
+    });
+  } catch(err) {
+    console.error(err);
+  }
+}
+
+function setupPeerConnectionHandlers(conn) {
+  conn.on('open', () => {
+    console.log('P2P DataConnection connected successfully!');
+    if (!isHost) {
+      conn.send({
+        type: 'guest_hello',
+        name: getMyPlayerName()
+      });
+    }
+  });
+
+  conn.on('data', async (data) => {
+    await handlePeerMessage(data);
+  });
+
+  conn.on('close', () => {
+    console.log('P2P connection closed');
+    onlineActive = false;
+    stopClockTimer();
+    updateOnlineBadge('🔴 Đối thủ đã ngắt kết nối');
+    addChatMessage('Hệ thống', 'Đối thủ đã rời khỏi phòng đấu.', 'sys');
+    showToast('Đối thủ đã rời phòng!', 'error', '⚠️');
+  });
+
+  conn.on('error', (err) => {
+    console.error('Connection error:', err);
+    updateOnlineBadge('🔴 Lỗi kết nối P2P');
+  });
+}
+
+async function handlePeerMessage(data) {
   const type = data.type;
 
-  if (type === 'room_created') {
-    currentRoomId = data.room_id;
-    myOnlineColor = data.color;
-    timeControl = data.time_control;
-    whiteRemaining = timeControl;
-    blackRemaining = timeControl;
+  if (type === 'guest_hello' && isHost) {
+    const guestName = data.name || 'Khách';
+    const hostName = getMyPlayerName();
 
-    document.getElementById('display-room-id').textContent = currentRoomId;
-    document.getElementById('room-info-box').style.display = 'block';
-    updateOnlineBadge(`🟡 Phòng ${currentRoomId} (Chờ đối thủ)`);
-    addChatMessage('Hệ thống', `Đã tạo phòng ${currentRoomId}. Hãy gửi mã hoặc link cho bạn bè!`, 'sys');
-    showToast(`Đã tạo phòng ${currentRoomId}!`, 'success', '🏰');
-    
-    if (myOnlineColor === 'w') setCameraPreset('white');
-    else setCameraPreset('black');
+    let hostColor = 'w';
+    let guestColor = 'b';
+    if (hostColorPref === 'b') {
+      hostColor = 'b';
+      guestColor = 'w';
+    } else if (hostColorPref === 'random') {
+      if (Math.random() < 0.5) {
+        hostColor = 'b';
+        guestColor = 'w';
+      }
+    }
+
+    myOnlineColor = hostColor;
+    whitePlayerName = (hostColor === 'w') ? hostName : guestName;
+    blackPlayerName = (hostColor === 'b') ? hostName : guestName;
+
+    const startPayload = {
+      type: 'game_start',
+      room_id: currentRoomId,
+      white_name: whitePlayerName,
+      black_name: blackPlayerName,
+      white_time: timeControl,
+      black_time: timeControl,
+      time_control: timeControl,
+      guest_color: guestColor
+    };
+
+    sendPeerMsg(startPayload);
+    initOnlineGame(startPayload, hostColor);
   }
   else if (type === 'game_start') {
-    onlineActive = true;
-    currentRoomId = data.room_id;
-    whitePlayerName = data.white_name || 'Trắng';
-    blackPlayerName = data.black_name || 'Đen';
-    whiteRemaining = data.white_time;
-    blackRemaining = data.black_time;
-
-    chess.reset();
-    syncBoardFromChess();
-    clearSelection();
-    updateUI();
-
-    document.getElementById('in-game-actions').style.display = 'block';
-    document.getElementById('chat-section').style.display = 'flex';
-    updateOnlineBadge(`🟢 Đang đấu: ${currentRoomId}`);
-    
-    addChatMessage('Hệ thống', `Trận đấu bắt đầu! ⚪ ${whitePlayerName} vs ⚫ ${blackPlayerName}`, 'sys');
-    showToast('Đối thủ đã vào bàn! Bắt đầu trận đấu!', 'success', '⚔️');
-
-    if (myOnlineColor === 'w') setCameraPreset('white');
-    else setCameraPreset('black');
+    myOnlineColor = data.guest_color;
+    initOnlineGame(data, myOnlineColor);
   }
-  else if (type === 'move_made') {
+  else if (type === 'move') {
     executeMove(data.from, data.to, data.promo, false);
-    whiteRemaining = data.white_time;
-    blackRemaining = data.black_time;
+    if (data.white_time !== undefined) whiteRemaining = data.white_time;
+    if (data.black_time !== undefined) blackRemaining = data.black_time;
     updateUI();
   }
   else if (type === 'time_sync') {
@@ -1042,6 +1207,7 @@ async function handleServerMessage(data) {
   }
   else if (type === 'game_over') {
     onlineActive = false;
+    stopClockTimer();
     let title = 'KẾT THÚC TRẬN ĐẤU';
     let desc = '';
     if (data.reason === 'timeout') {
@@ -1056,43 +1222,111 @@ async function handleServerMessage(data) {
     showBanner(title, desc, true);
     addChatMessage('Hệ thống', desc, 'sys');
   }
-  else if (type === 'draw_offered') {
+  else if (type === 'offer_draw') {
     playSound('check');
     const ok = await showCustomConfirm('LỜI MỜI HÒA CỜ', 'Đối thủ gửi lời xin hòa cờ. Bạn có đồng ý kết thúc hòa không?', '🤝', 'Đồng ý hòa', 'Từ chối');
     if (ok) {
-      ws.send(jsonStr({ action: 'draw_response', accept: true }));
+      sendPeerMsg({ type: 'draw_response', accept: true });
+      onlineActive = false;
+      stopClockTimer();
+      showBanner('HÒA CỜ', 'Hai bên đã đồng ý hòa cờ.', true);
+      addChatMessage('Hệ thống', 'Trận đấu kết thúc với kết quả Hòa.', 'sys');
     } else {
-      ws.send(jsonStr({ action: 'draw_response', accept: false }));
+      sendPeerMsg({ type: 'draw_response', accept: false });
     }
   }
-  else if (type === 'draw_declined') {
-    addChatMessage('Hệ thống', 'Đối thủ đã từ chối lời xin hòa.', 'sys');
-    showToast('Đối thủ từ chối hòa cờ!', 'error', '❌');
+  else if (type === 'draw_response') {
+    if (data.accept) {
+      onlineActive = false;
+      stopClockTimer();
+      showBanner('HÒA CỜ', 'Đối thủ đã chấp nhận lời mời hòa cờ!', true);
+      addChatMessage('Hệ thống', 'Hai bên đã đồng ý hòa cờ.', 'sys');
+    } else {
+      addChatMessage('Hệ thống', 'Đối thủ đã từ chối lời xin hòa.', 'sys');
+      showToast('Đối thủ từ chối hòa cờ!', 'error', '❌');
+    }
   }
-  else if (type === 'rematch_requested') {
+  else if (type === 'resign') {
+    onlineActive = false;
+    stopClockTimer();
+    const winnerName = (myOnlineColor === 'w') ? whitePlayerName : blackPlayerName;
+    const desc = `${winnerName} chiến thắng do đối thủ đầu hàng!`;
+    playSound('win');
+    showBanner('CHIẾN THẮNG!', desc, true);
+    addChatMessage('Hệ thống', desc, 'sys');
+  }
+  else if (type === 'rematch_request') {
     playSound('win');
     const ok = await showCustomConfirm('YÊU CẦU TÁI ĐẤU', 'Đối thủ muốn tái đấu (sẽ đổi phe Trắng / Đen). Bạn có đồng ý không?', '🔄', 'Chấp nhận', 'Từ chối');
     if (ok) {
-      ws.send(jsonStr({ action: 'rematch' }));
+      const newMyColor = (myOnlineColor === 'w') ? 'b' : 'w';
+      myOnlineColor = newMyColor;
+      whiteRemaining = timeControl;
+      blackRemaining = timeControl;
+      const swapPayload = {
+        type: 'rematch_start',
+        white_name: (newMyColor === 'w') ? getMyPlayerName() : whitePlayerName,
+        black_name: (newMyColor === 'b') ? getMyPlayerName() : blackPlayerName
+      };
+      sendPeerMsg(swapPayload);
+      startRematchLocal();
     }
   }
-  else if (type === 'emote_sent') {
+  else if (type === 'rematch_start') {
+    myOnlineColor = (myOnlineColor === 'w') ? 'b' : 'w';
+    whiteRemaining = timeControl;
+    blackRemaining = timeControl;
+    startRematchLocal();
+    showToast('Tái đấu đã bắt đầu! Đổi phe cờ!', 'success', '🔄');
+  }
+  else if (type === 'emote') {
     spawnFloatingEmote(data.icon, data.color);
   }
-  else if (type === 'chat_msg') {
+  else if (type === 'chat') {
     const isMe = (data.color === myOnlineColor);
     addChatMessage(data.sender, data.text, isMe ? 'me' : 'opp');
     playSound('select');
   }
-  else if (type === 'opponent_disconnected') {
-    updateOnlineBadge('🔴 ' + data.message);
-    addChatMessage('Hệ thống', data.message, 'sys');
-    showToast(data.message, 'error', '⚠️');
-  }
-  else if (type === 'error') {
-    showToast(data.message, 'error', '❌');
-    updateOnlineBadge('🔴 ' + data.message);
-  }
+}
+
+function initOnlineGame(data, myColor) {
+  onlineActive = true;
+  whitePlayerName = data.white_name || 'Trắng';
+  blackPlayerName = data.black_name || 'Đen';
+  timeControl = data.time_control || 300;
+  whiteRemaining = data.white_time || timeControl;
+  blackRemaining = data.black_time || timeControl;
+
+  chess.reset();
+  syncBoardFromChess();
+  clearSelection();
+  updateUI();
+
+  document.getElementById('in-game-actions').style.display = 'block';
+  document.getElementById('chat-section').style.display = 'flex';
+  updateOnlineBadge(`🟢 Đang đấu: ${currentRoomId}`);
+  
+  addChatMessage('Hệ thống', `Trận đấu bắt đầu! ⚪ ${whitePlayerName} vs ⚫ ${blackPlayerName}`, 'sys');
+  showToast('Đối thủ đã vào bàn! Bắt đầu trận đấu!', 'success', '⚔️');
+
+  if (myColor === 'w') setCameraPreset('white');
+  else setCameraPreset('black');
+
+  startClockTimer();
+}
+
+function startRematchLocal() {
+  onlineActive = true;
+  chess.reset();
+  syncBoardFromChess();
+  clearSelection();
+  updateUI();
+
+  if (myOnlineColor === 'w') setCameraPreset('white');
+  else setCameraPreset('black');
+
+  startClockTimer();
+  addChatMessage('Hệ thống', 'Ván tái đấu đã bắt đầu!', 'sys');
 }
 
 function updateOnlineBadge(txt) {
@@ -1125,42 +1359,69 @@ function checkUrlParams() {
   const roomId = params.get('room');
   if (roomId) {
     document.getElementById('mode-online').click();
-    connectWebSocket(() => {
-      ws.send(jsonStr({ action: 'join_room', room_id: roomId.toUpperCase(), name: getMyPlayerName() }));
-    });
+    setTimeout(() => {
+      joinRoomP2P(roomId);
+    }, 500);
   }
 }
 
 // ── Event Handlers: Online Section ───────────────────────────────────────────
 document.getElementById('btn-quick-match').onclick = () => {
   const timeCtl = parseInt(document.getElementById('select-time-control').value);
-  connectWebSocket(() => {
-    ws.send(jsonStr({ action: 'quick_match', time_control: timeCtl, name: getMyPlayerName() }));
-    showToast('Đang tìm kiếm đối thủ 1v1...', 'info', '🔍');
-  });
+  showToast('Đang kết nối sảnh công cộng...', 'info', '🔍');
+  
+  const publicRoomId = 'HLW-PUBLIC';
+  const hostPeerId = `hlw-chess-${publicRoomId.toLowerCase()}`;
+  
+  updateOnlineBadge('🔍 Đang tìm kiếm đối thủ...');
+  
+  try {
+    peer = new Peer(PEER_CONFIG);
+    let joined = false;
+    
+    peer.on('open', () => {
+      const conn = peer.connect(hostPeerId, { reliable: true });
+      
+      conn.on('open', () => {
+        joined = true;
+        peerConn = conn;
+        isHost = false;
+        currentRoomId = publicRoomId;
+        setupPeerConnectionHandlers(conn);
+        showToast('Đã tìm thấy đối thủ!', 'success', '⚔️');
+      });
+      
+      setTimeout(() => {
+        if (!joined) {
+          try { conn.close(); } catch(e){}
+          try { peer.destroy(); } catch(e){}
+          createRoomP2P(timeCtl, 'random');
+          updateOnlineBadge('🔍 Đang đợi người vào ghép trận...');
+          showToast('Đã tạo sảnh chờ, đang đợi đối thủ...', 'info', '⏳');
+        }
+      }, 1600);
+    });
+  } catch(e){
+    createRoomP2P(timeCtl, 'random');
+  }
 };
 
 document.getElementById('btn-create-room').onclick = () => {
   const timeCtl = parseInt(document.getElementById('select-time-control').value);
   const prefColor = document.getElementById('select-color').value;
-  connectWebSocket(() => {
-    ws.send(jsonStr({ action: 'create_room', time_control: timeCtl, color: prefColor, name: getMyPlayerName() }));
-  });
+  createRoomP2P(timeCtl, prefColor);
 };
 
 document.getElementById('btn-join-modal').onclick = async () => {
   const code = await showCustomPrompt('VÀO PHÒNG ĐẤU', 'Nhập mã phòng cờ 6 ký tự để tham chiến:', 'HLW-XXXX', '', '🔑');
   if (code && code.trim()) {
-    connectWebSocket(() => {
-      ws.send(jsonStr({ action: 'join_room', room_id: code.trim().toUpperCase(), name: getMyPlayerName() }));
-    });
-    showToast(`Đang kết nối vào phòng ${code}...`, 'info', '⏳');
+    joinRoomP2P(code.trim());
   }
 };
 
 document.getElementById('btn-copy-link').onclick = () => {
   if (!currentRoomId) return;
-  const link = `${window.location.origin}/?room=${currentRoomId}`;
+  const link = `${window.location.origin}${window.location.pathname}?room=${currentRoomId.replace('HLW-', '')}`;
   navigator.clipboard.writeText(link);
   showToast('Đã sao chép Link phòng vào bộ nhớ tạm!', 'success', '📋');
 };
@@ -1174,15 +1435,20 @@ document.getElementById('btn-copy-code').onclick = () => {
 document.getElementById('btn-resign').onclick = async () => {
   const ok = await showCustomConfirm('ĐẦU HÀNG', 'Bạn có chắc chắn muốn đầu hàng đối thủ trong ván này không?', '🏳️', 'Đầu hàng', 'Tiếp tục đấu');
   if (ok) {
-    if (gameMode === 'online' && ws) {
-      ws.send(jsonStr({ action: 'resign' }));
+    if (gameMode === 'online') {
+      sendPeerMsg({ type: 'resign' });
+      onlineActive = false;
+      stopClockTimer();
+      const oppName = (myOnlineColor === 'w') ? blackPlayerName : whitePlayerName;
+      showBanner('KẾT THÚC', `Bạn đã đầu hàng. ${oppName} giành chiến thắng!`, true);
+      addChatMessage('Hệ thống', 'Bạn đã đầu hàng.', 'sys');
     }
   }
 };
 
 document.getElementById('btn-offer-draw').onclick = () => {
-  if (gameMode === 'online' && ws) {
-    ws.send(jsonStr({ action: 'offer_draw' }));
+  if (gameMode === 'online') {
+    sendPeerMsg({ type: 'offer_draw' });
     addChatMessage('Hệ thống', 'Đã gửi lời xin hòa tới đối thủ...', 'sys');
     showToast('Đã gửi lời xin hòa!', 'info', '🤝');
   }
@@ -1215,7 +1481,6 @@ document.getElementById('ai-side-black').onclick = function() {
   setCameraPreset('black');
   showToast('Bạn cầm quân Đen (AI đi trước)', 'info', '⚫');
   
-  // If starting fresh and player is Black, AI immediately makes first move for White!
   if (chess.history().length === 0 && chess.turn() === 'w') {
     const statusEl = document.getElementById('ai-status-text');
     if (statusEl) statusEl.textContent = '🔮 Lich King đang đi nước mở màn...';
@@ -1248,8 +1513,8 @@ document.querySelectorAll('.emote-btn').forEach(btn => {
   btn.onclick = () => {
     const icon = btn.dataset.emote;
     spawnFloatingEmote(icon, myOnlineColor);
-    if (gameMode === 'online' && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(jsonStr({ action: 'emote', icon }));
+    if (gameMode === 'online') {
+      sendPeerMsg({ type: 'emote', icon, color: myOnlineColor });
     }
   };
 });
@@ -1258,9 +1523,12 @@ function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
-  if (gameMode === 'online' && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(jsonStr({ action: 'chat', text }));
+  if (gameMode === 'online') {
+    const sender = getMyPlayerName();
+    addChatMessage(sender, text, 'me');
+    sendPeerMsg({ type: 'chat', text, sender, color: myOnlineColor });
     input.value = '';
+    playSound('select');
   }
 }
 
@@ -1329,7 +1597,7 @@ document.getElementById('mode-online').onclick = function() {
   document.getElementById('ai-panel').style.display = 'none';
   document.getElementById('online-panel').style.display = 'flex';
   document.getElementById('chat-section').style.display = 'flex';
-  connectWebSocket();
+  updateOnlineBadge('🟢 Sẵn sàng tạo hoặc vào phòng P2P');
   updateUI();
 };
 
