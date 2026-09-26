@@ -1,0 +1,29 @@
+# Blender auto-backups
+*.blend1
+*.blend2
+*.blend@
+
+# Python bytecode & environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Environment files & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Operating System & IDE metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Testing & Logs
+.pytest_cache/
+*.log

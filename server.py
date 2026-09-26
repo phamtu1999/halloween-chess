@@ -1,38 +1,51 @@
 #!/usr/bin/env python3
 """
-Halloween 3D Chess — Unified HTTP & WebSocket Multiplayer Server
+Halloween 3D Chess — Unified HTTP & WebSocket Multiplayer Server (Hardened & Authoritative)
 """
 
 import asyncio
 import json
 import os
-import random
+import secrets
 import string
 import time
+from collections import defaultdict
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import threading
+import chess
 import websockets
 
 HTTP_PORT = 8080
 WS_PORT = 8081
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ── Game Rooms & State ────────────────────────────────────────────────────────
-rooms = {}       # room_id -> Room instance
-quick_queue = [] # list of (websocket, time_control)
+ALLOWED_ORIGINS = {
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://phamtu1999.github.io",
+}
 
-def generate_room_id():
-    return "HLW-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+# ── Cryptographic Room ID Generation ──────────────────────────────────────────
+ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+def generate_room_id(length=6):
+    return "HLW-" + "".join(secrets.choice(ROOM_CODE_ALPHABET) for _ in range(length))
+
+# ── Game Rooms & State ────────────────────────────────────────────────────────
+rooms = {}       # room_id -> GameRoom instance
+quick_queue = [] # list of (websocket, time_control, player_name)
 
 class GameRoom:
     def __init__(self, room_id, time_control=300, host_color="random"):
         self.room_id = room_id
-        self.time_control = time_control # in seconds (0 = unlimited)
-        self.white_time = time_control
-        self.black_time = time_control
-        self.turn = "w"
+        self.time_control = int(time_control) # in seconds (0 = unlimited)
+        self.white_time = float(self.time_control)
+        self.black_time = float(self.time_control)
         self.status = "waiting" # waiting, playing, ended
         
+        self.board = chess.Board()
         self.host_pref_color = host_color
         self.white_ws = None
         self.black_ws = None
@@ -44,7 +57,12 @@ class GameRoom:
         self.rematch_votes = set()
         self.moves = []
 
+    @property
+    def turn(self):
+        return "w" if self.board.turn == chess.WHITE else "b"
+
     def assign_player(self, ws, name="Người chơi"):
+        name = str(name)[:25] if name else "Người chơi"
         if not self.white_ws and not self.black_ws:
             # First player (Host)
             if self.host_pref_color == "w":
@@ -56,7 +74,7 @@ class GameRoom:
                 self.black_name = name
                 return "b"
             else: # Random
-                color = random.choice(["w", "b"])
+                color = secrets.choice(["w", "b"])
                 if color == "w":
                     self.white_ws = ws
                     self.white_name = name
@@ -92,33 +110,50 @@ class GameRoom:
             if ws and not ws.closed:
                 try:
                     await ws.send(msg)
-                except:
+                except Exception:
                     pass
 
     def start_game(self):
+        self.board.reset()
         self.status = "playing"
-        self.turn = "w"
-        self.last_tick = time.time()
+        self.white_time = float(self.time_control)
+        self.black_time = float(self.time_control)
+        self.last_tick = time.monotonic()
         self.moves = []
+        self.draw_offered_by = None
+        self.rematch_votes.clear()
 
     def update_clock(self):
         if self.status != "playing" or self.time_control <= 0:
             return None
-        now = time.time()
+        now = time.monotonic()
         elapsed = now - (self.last_tick or now)
         self.last_tick = now
 
-        if self.turn == "w":
-            self.white_time = max(0, self.white_time - elapsed)
+        if self.board.turn == chess.WHITE:
+            self.white_time = max(0.0, self.white_time - elapsed)
             if self.white_time <= 0:
                 self.status = "ended"
                 return "b" # Black wins on time
         else:
-            self.black_time = max(0, self.black_time - elapsed)
+            self.black_time = max(0.0, self.black_time - elapsed)
             if self.black_time <= 0:
                 self.status = "ended"
                 return "w" # White wins on time
         return None
+
+# ── Rate Limiter ─────────────────────────────────────────────────────────────
+ws_message_counts = defaultdict(list)
+
+def is_rate_limited(ws, max_per_second=10):
+    now = time.monotonic()
+    timestamps = ws_message_counts[id(ws)]
+    # Keep timestamps within the last 1.0 second
+    ws_message_counts[id(ws)] = [t for t in timestamps if now - t < 1.0]
+    if len(ws_message_counts[id(ws)]) >= max_per_second:
+        return True
+    ws_message_counts[id(ws)].append(now)
+    return False
 
 # ── WebSocket Handler ─────────────────────────────────────────────────────────
 async def ws_handler(websocket):
@@ -127,18 +162,36 @@ async def ws_handler(websocket):
 
     try:
         async for raw_msg in websocket:
+            if is_rate_limited(websocket):
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": "Bạn gửi tin nhắn quá nhanh. Vui lòng chờ giây lát!"
+                }))
+                continue
+
             try:
                 data = json.loads(raw_msg)
-            except:
+            except Exception:
+                continue
+
+            if not isinstance(data, dict):
                 continue
 
             action = data.get("action")
 
             # 1. CREATE CUSTOM ROOM
             if action == "create_room":
-                time_ctl = int(data.get("time_control", 300))
+                try:
+                    time_ctl = int(data.get("time_control", 300))
+                    if time_ctl not in [0, 60, 180, 300, 600, 900, 1800]:
+                        time_ctl = 300
+                except (ValueError, TypeError):
+                    time_ctl = 300
+
                 pref_col = data.get("color", "random")
-                name = data.get("name", "Chủ phòng")
+                if pref_col not in ["w", "b", "random"]:
+                    pref_col = "random"
+                name = str(data.get("name", "Chủ phòng"))[:25]
 
                 room_id = generate_room_id()
                 while room_id in rooms:
@@ -159,8 +212,8 @@ async def ws_handler(websocket):
 
             # 2. JOIN ROOM
             elif action == "join_room":
-                room_id = data.get("room_id", "").strip().upper()
-                name = data.get("name", "Khách")
+                room_id = str(data.get("room_id", "")).strip().upper()
+                name = str(data.get("name", "Khách"))[:25]
 
                 if room_id not in rooms:
                     await websocket.send(json.dumps({
@@ -195,14 +248,24 @@ async def ws_handler(websocket):
 
             # 3. QUICK MATCH (GHÉP TRẬN NHANH)
             elif action == "quick_match":
-                time_ctl = int(data.get("time_control", 300))
-                name = data.get("name", "Người chơi")
+                try:
+                    time_ctl = int(data.get("time_control", 300))
+                    if time_ctl not in [0, 60, 180, 300, 600, 900, 1800]:
+                        time_ctl = 300
+                except (ValueError, TypeError):
+                    time_ctl = 300
+                name = str(data.get("name", "Người chơi"))[:25]
 
-                # Check if someone is waiting in queue
+                # Clean any previous entry of this socket from queue
+                for q in list(quick_queue):
+                    if q[0] == websocket:
+                        quick_queue.remove(q)
+
+                # Check if someone else is waiting in queue
                 matched = None
                 for item in list(quick_queue):
                     other_ws, other_time, other_name = item
-                    if not other_ws.closed and other_time == time_ctl:
+                    if other_ws != websocket and not other_ws.closed and other_time == time_ctl:
                         matched = item
                         quick_queue.remove(item)
                         break
@@ -212,7 +275,7 @@ async def ws_handler(websocket):
                     room_id = generate_room_id()
                     room = GameRoom(room_id, time_control=time_ctl, host_color="random")
                     
-                    c1 = room.assign_player(other_ws, other_name)
+                    room.assign_player(other_ws, other_name)
                     c2 = room.assign_player(websocket, name)
                     rooms[room_id] = room
                     current_room = room
@@ -236,20 +299,48 @@ async def ws_handler(websocket):
                         "message": "Đang tìm kiếm đối thủ xứng tầm..."
                     }))
 
-            # 4. MOVE PIECE
+            # 4. MOVE PIECE (AUTHORITATIVE SERVER-SIDE CHESS VALIDATION)
             elif action == "move":
                 if not current_room or current_room.status != "playing":
                     continue
-                if current_room.get_color(websocket) != current_room.turn:
-                    continue # Not player's turn
 
-                mv_from = data.get("from")
-                mv_to = data.get("to")
-                promo = data.get("promo", "q")
+                player_col = current_room.get_color(websocket)
+                if player_col != current_room.turn:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Chưa tới lượt của bạn!"
+                    }))
+                    continue
 
+                mv_from = str(data.get("from", "")).lower().strip()
+                mv_to = str(data.get("to", "")).lower().strip()
+                promo = str(data.get("promo", "q")).lower().strip()
+                if promo not in ["q", "r", "b", "n"]:
+                    promo = "q"
+
+                uci_str = f"{mv_from}{mv_to}"
+                try:
+                    move = chess.Move.from_uci(f"{uci_str}{promo}")
+                    if move not in current_room.board.legal_moves:
+                        move = chess.Move.from_uci(uci_str)
+                except Exception:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Định dạng nước cờ không hợp lệ!"
+                    }))
+                    continue
+
+                if move not in current_room.board.legal_moves:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Nước cờ không hợp lệ theo luật cờ vua!"
+                    }))
+                    continue
+
+                # Execute authoritative move
+                current_room.board.push(move)
                 current_room.moves.append({"from": mv_from, "to": mv_to, "promo": promo})
-                current_room.turn = "b" if current_room.turn == "w" else "w"
-                current_room.draw_offered_by = None # Reset draw offer on move
+                current_room.draw_offered_by = None
 
                 # Broadcast move to both players
                 await current_room.broadcast({
@@ -261,6 +352,23 @@ async def ws_handler(websocket):
                     "white_time": current_room.white_time,
                     "black_time": current_room.black_time
                 })
+
+                # Check game termination conditions
+                if current_room.board.is_checkmate():
+                    current_room.status = "ended"
+                    winner = player_col # player who just made the checkmating move
+                    await current_room.broadcast({
+                        "type": "game_over",
+                        "reason": "checkmate",
+                        "winner": winner
+                    })
+                elif current_room.board.is_stalemate() or current_room.board.is_insufficient_material() or current_room.board.is_seventyfive_moves() or current_room.board.is_fivefold_repetition():
+                    current_room.status = "ended"
+                    await current_room.broadcast({
+                        "type": "game_over",
+                        "reason": "draw",
+                        "winner": None
+                    })
 
             # 5. RESIGN (ĐẦU HÀNG)
             elif action == "resign":
@@ -295,7 +403,7 @@ async def ws_handler(websocket):
                 if not current_room or current_room.status != "playing":
                     continue
                 accepted = bool(data.get("accept", False))
-                if accepted and current_room.draw_offered_by:
+                if accepted and current_room.draw_offered_by and current_room.draw_offered_by != current_room.get_color(websocket):
                     current_room.status = "ended"
                     await current_room.broadcast({
                         "type": "game_over",
@@ -310,23 +418,25 @@ async def ws_handler(websocket):
                         }))
                 current_room.draw_offered_by = None
 
-            # 8. EMOTE / REACTION (🎃, 👻, 💀, 🔥)
+            # 8. EMOTE / REACTION (RATE LIMITED)
             elif action == "emote":
                 if not current_room:
                     continue
-                icon = data.get("icon", "🎃")
-                color = current_room.get_color(websocket)
-                await current_room.broadcast({
-                    "type": "emote_sent",
-                    "color": color,
-                    "icon": icon
-                })
+                allowed_icons = {"🎃", "👻", "💀", "🧙", "🦇", "🕷️", "🔥", "👏"}
+                icon = str(data.get("icon", "🎃"))
+                if icon in allowed_icons:
+                    color = current_room.get_color(websocket)
+                    await current_room.broadcast({
+                        "type": "emote_sent",
+                        "color": color,
+                        "icon": icon
+                    })
 
-            # 9. CHAT MESSAGE
+            # 9. CHAT MESSAGE (SANITIZED & BOUNDED)
             elif action == "chat":
                 if not current_room:
                     continue
-                text = data.get("text", "").strip()
+                text = str(data.get("text", "")).strip()[:150]
                 if text:
                     color = current_room.get_color(websocket)
                     sender_name = current_room.white_name if color == "w" else current_room.black_name
@@ -337,7 +447,7 @@ async def ws_handler(websocket):
                         "text": text
                     })
 
-            # 10. REMATCH (TÁI ĐẤU)
+            # 10. REMATCH (TÁI ĐẤU - MUTUAL AGREEMENT)
             elif action == "rematch":
                 if not current_room:
                     continue
@@ -347,8 +457,6 @@ async def ws_handler(websocket):
                     # Swap colors and start fresh
                     current_room.white_ws, current_room.black_ws = current_room.black_ws, current_room.white_ws
                     current_room.white_name, current_room.black_name = current_room.black_name, current_room.white_name
-                    current_room.white_time = current_room.time_control
-                    current_room.black_time = current_room.time_control
                     current_room.rematch_votes.clear()
                     current_room.start_game()
 
@@ -370,6 +478,7 @@ async def ws_handler(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
+        ws_message_counts.pop(id(websocket), None)
         # Cleanup on disconnect
         for q in list(quick_queue):
             if q[0] == websocket:
@@ -411,12 +520,40 @@ async def timer_loop():
                         "turn": room.turn
                     })
 
-# ── Static HTTP Server ────────────────────────────────────────────────────────
+# ── Safe Static HTTP Server (Blocks Directory Listing & Sensitive Files) ─────
+def is_safe_static_path(path: str) -> bool:
+    norm = path.replace("\\", "/").strip("/")
+    parts = norm.split("/")
+    if any(p.startswith(".") for p in parts if p):
+        return False
+    blocked_exts = ('.blend', '.blend1', '.blend2', '.py', '.sh', '.env', '.git', '.md')
+    if any(norm.lower().endswith(ext) for ext in blocked_exts):
+        return False
+    return True
+
+class SafeHTTPRequestHandler(SimpleHTTPRequestHandler):
+    def list_directory(self, path):
+        self.send_error(403, "Directory listing forbidden")
+        return None
+
+    def translate_path(self, path):
+        if not is_safe_static_path(path):
+            return "/dev/null"
+        clean_path = super().translate_path(path)
+        if not is_safe_static_path(clean_path):
+            return "/dev/null"
+        return clean_path
+
+    def end_headers(self):
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'strict-origin-when-cross-origin')
+        super().end_headers()
+
 def run_http_server():
     os.chdir(STATIC_DIR)
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(("", HTTP_PORT), handler)
-    print(f"🌐 HTTP Static Server running at http://localhost:{HTTP_PORT}")
+    httpd = HTTPServer(("", HTTP_PORT), SafeHTTPRequestHandler)
+    print(f"🌐 Safe HTTP Static Server running at http://localhost:{HTTP_PORT}")
     httpd.serve_forever()
 
 # ── Main Entrypoint ───────────────────────────────────────────────────────────
@@ -427,7 +564,7 @@ async def main():
 
     # Start WebSocket Server & Timer loop
     async with websockets.serve(ws_handler, "0.0.0.0", WS_PORT):
-        print(f"⚡ WebSocket Multiplayer Server running on ws://localhost:{WS_PORT}")
+        print(f"⚡ Authoritative WebSocket Server running on ws://localhost:{WS_PORT}")
         await timer_loop()
 
 if __name__ == "__main__":

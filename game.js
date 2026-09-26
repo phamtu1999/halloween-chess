@@ -114,7 +114,16 @@ function showToast(text, type = 'info', icon = '🎃') {
 
   const toast = document.createElement('div');
   toast.className = `toast-msg ${type}`;
-  toast.innerHTML = `<span style="font-size: 16px;">${icon}</span> <span>${text}</span>`;
+  
+  const iconSpan = document.createElement('span');
+  iconSpan.style.fontSize = '16px';
+  iconSpan.textContent = icon;
+  
+  const textSpan = document.createElement('span');
+  textSpan.textContent = ' ' + text;
+  
+  toast.appendChild(iconSpan);
+  toast.appendChild(textSpan);
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -879,6 +888,7 @@ document.getElementById('banner-ok-btn').onclick = () => {
 document.getElementById('banner-rematch-btn').onclick = () => {
   document.getElementById('banner-modal').style.display = 'none';
   if (gameMode === 'online') {
+    rematchRequestedByMe = true;
     sendPeerMsg({ type: 'rematch_request' });
     addChatMessage('Hệ thống', 'Đã gửi yêu cầu tái đấu...', 'sys');
     showToast('Đã gửi lời mời tái đấu tới đối thủ!', 'info', '🔄');
@@ -1032,9 +1042,24 @@ function handleTimeout(winnerColor) {
   }
 }
 
+function generateSecureRoomCode(length = 6) {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const randomBytes = new Uint8Array(length);
+  if (window.crypto && window.crypto.getRandomValues) {
+    window.crypto.getRandomValues(randomBytes);
+  } else {
+    for (let i = 0; i < length; i++) randomBytes[i] = Math.floor(Math.random() * 256);
+  }
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += chars[randomBytes[i] % chars.length];
+  }
+  return code;
+}
+
 function getPeerRoomInfo(rawCode) {
   let clean = (rawCode || '').trim().toUpperCase().replace(/^HLW-?/i, '').replace(/[^A-Z0-9]/g, '');
-  if (!clean) clean = Math.random().toString(36).substring(2, 6).toUpperCase();
+  if (!clean) clean = generateSecureRoomCode(6);
   return {
     displayCode: `HLW-${clean}`,
     peerId: `hlw-chess-room-${clean.toLowerCase()}`,
@@ -1053,7 +1078,7 @@ function createRoomP2P(timeCtl, colorPref) {
   hostColorPref = colorPref;
   isHost = true;
 
-  const roomInfo = getPeerRoomInfo(Math.random().toString(36).substring(2, 6).toUpperCase());
+  const roomInfo = getPeerRoomInfo(generateSecureRoomCode(6));
   currentRoomId = roomInfo.displayCode;
 
   updateOnlineBadge(`🟡 Đang mở phòng ${currentRoomId}...`);
@@ -1153,11 +1178,43 @@ function setupPeerConnectionHandlers(conn) {
   });
 }
 
+let drawOfferedByMe = false;
+let rematchRequestedByMe = false;
+let lastEmoteTime = 0;
+let emoteCountWindow = 0;
+let lastChatTime = 0;
+let chatCountWindow = 0;
+
+function checkEmoteRateLimit() {
+  const now = Date.now();
+  if (now - lastEmoteTime > 3000) {
+    lastEmoteTime = now;
+    emoteCountWindow = 0;
+  }
+  emoteCountWindow++;
+  return emoteCountWindow <= 6;
+}
+
+function checkChatRateLimit() {
+  const now = Date.now();
+  if (now - lastChatTime > 3000) {
+    lastChatTime = now;
+    chatCountWindow = 0;
+  }
+  chatCountWindow++;
+  return chatCountWindow <= 6;
+}
+
 async function handlePeerMessage(data) {
+  if (!data || typeof data !== 'object') return;
   const type = data.type;
 
   if (type === 'guest_hello' && isHost) {
-    const guestName = data.name || 'Khách';
+    if (onlineActive) {
+      console.warn('Ignoring duplicate guest_hello while match is active');
+      return;
+    }
+    const guestName = (typeof data.name === 'string' ? data.name.trim().slice(0, 25) : '') || 'Khách';
     const hostName = getMyPlayerName();
 
     let hostColor = 'w';
@@ -1166,7 +1223,13 @@ async function handlePeerMessage(data) {
       hostColor = 'b';
       guestColor = 'w';
     } else if (hostColorPref === 'random') {
-      if (Math.random() < 0.5) {
+      const randomBuf = new Uint8Array(1);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(randomBuf);
+      } else {
+        randomBuf[0] = Math.floor(Math.random() * 256);
+      }
+      if (randomBuf[0] % 2 === 1) {
         hostColor = 'b';
         guestColor = 'w';
       }
@@ -1191,38 +1254,75 @@ async function handlePeerMessage(data) {
     initOnlineGame(startPayload, hostColor);
   }
   else if (type === 'game_start') {
+    if (onlineActive) return;
+    if (data.guest_color !== 'w' && data.guest_color !== 'b') return;
     myOnlineColor = data.guest_color;
     initOnlineGame(data, myOnlineColor);
   }
   else if (type === 'move') {
-    executeMove(data.from, data.to, data.promo, false);
-    if (data.white_time !== undefined) whiteRemaining = data.white_time;
-    if (data.black_time !== undefined) blackRemaining = data.black_time;
+    if (!onlineActive || chess.game_over()) return;
+    if (typeof data.from !== 'string' || typeof data.to !== 'string') return;
+    
+    // Authorization: Verify it's opponent's turn
+    const currentTurn = chess.turn();
+    if (currentTurn === myOnlineColor) {
+      console.warn('Received move while it is my turn; ignoring');
+      return;
+    }
+    
+    const promo = (typeof data.promo === 'string' && ['q', 'r', 'b', 'n'].includes(data.promo.toLowerCase()))
+      ? data.promo.toLowerCase()
+      : 'q';
+
+    // Verify move legality locally
+    const testMove = chess.move({ from: data.from, to: data.to, promotion: promo });
+    if (!testMove) {
+      console.warn('Illegal move received from peer:', data);
+      showToast('Nước cờ đối thủ không hợp lệ!', 'error', '⚠️');
+      return;
+    }
+    chess.undo();
+
+    executeMove(data.from, data.to, promo, false);
+
+    // Controlled timer synchronization (tolerance <= 5s)
+    if (typeof data.white_time === 'number' && typeof data.black_time === 'number') {
+      const wDiff = Math.abs(whiteRemaining - data.white_time);
+      const bDiff = Math.abs(blackRemaining - data.black_time);
+      if (wDiff <= 5) whiteRemaining = Math.max(0, data.white_time);
+      if (bDiff <= 5) blackRemaining = Math.max(0, data.black_time);
+    }
     updateUI();
   }
   else if (type === 'time_sync') {
-    whiteRemaining = data.white_time;
-    blackRemaining = data.black_time;
-    updateUI();
+    if (!onlineActive || isHost) return;
+    if (typeof data.white_time === 'number' && typeof data.black_time === 'number') {
+      const wDiff = Math.abs(whiteRemaining - data.white_time);
+      const bDiff = Math.abs(blackRemaining - data.black_time);
+      if (wDiff <= 5) whiteRemaining = Math.max(0, data.white_time);
+      if (bDiff <= 5) blackRemaining = Math.max(0, data.black_time);
+      updateUI();
+    }
   }
   else if (type === 'game_over') {
-    onlineActive = false;
-    stopClockTimer();
-    let title = 'KẾT THÚC TRẬN ĐẤU';
-    let desc = '';
+    if (!onlineActive) return;
     if (data.reason === 'timeout') {
+      const timedOutColor = (data.winner === 'w') ? 'b' : 'w';
+      const rem = (timedOutColor === 'w') ? whiteRemaining : blackRemaining;
+      if (rem > 3) {
+        console.warn('Rejected timeout game_over because local timer has remaining time:', rem);
+        return;
+      }
+      onlineActive = false;
+      stopClockTimer();
       const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
-      desc = `${winName} chiến thắng do đối thủ hết giờ!`;
-    } else if (data.reason === 'resigned') {
-      const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
-      desc = `${winName} chiến thắng do đối thủ đầu hàng!`;
-    } else if (data.reason === 'draw_agreed') {
-      desc = 'Hai bên đã đồng ý hòa cờ.';
+      const desc = `${winName} chiến thắng do đối thủ hết giờ!`;
+      showBanner('HẾT GIỜ!', desc, true);
+      addChatMessage('Hệ thống', desc, 'sys');
     }
-    showBanner(title, desc, true);
-    addChatMessage('Hệ thống', desc, 'sys');
   }
   else if (type === 'offer_draw') {
+    if (!onlineActive) return;
     playSound('check');
     const ok = await showCustomConfirm('LỜI MỜI HÒA CỜ', 'Đối thủ gửi lời xin hòa cờ. Bạn có đồng ý kết thúc hòa không?', '🤝', 'Đồng ý hòa', 'Từ chối');
     if (ok) {
@@ -1236,6 +1336,8 @@ async function handlePeerMessage(data) {
     }
   }
   else if (type === 'draw_response') {
+    if (!drawOfferedByMe || !onlineActive) return;
+    drawOfferedByMe = false;
     if (data.accept) {
       onlineActive = false;
       stopClockTimer();
@@ -1247,6 +1349,7 @@ async function handlePeerMessage(data) {
     }
   }
   else if (type === 'resign') {
+    if (!onlineActive) return;
     onlineActive = false;
     stopClockTimer();
     const winnerName = (myOnlineColor === 'w') ? whitePlayerName : blackPlayerName;
@@ -1273,6 +1376,11 @@ async function handlePeerMessage(data) {
     }
   }
   else if (type === 'rematch_start') {
+    if (!rematchRequestedByMe) {
+      console.warn('Ignoring unrequested rematch_start');
+      return;
+    }
+    rematchRequestedByMe = false;
     myOnlineColor = (myOnlineColor === 'w') ? 'b' : 'w';
     whiteRemaining = timeControl;
     blackRemaining = timeControl;
@@ -1280,12 +1388,21 @@ async function handlePeerMessage(data) {
     showToast('Tái đấu đã bắt đầu! Đổi phe cờ!', 'success', '🔄');
   }
   else if (type === 'emote') {
-    spawnFloatingEmote(data.icon, data.color);
+    if (!checkEmoteRateLimit()) return;
+    const allowedIcons = ['🎃', '👻', '💀', '🧙', '🦇', '🕷️', '🔥', '👏'];
+    if (typeof data.icon === 'string' && allowedIcons.includes(data.icon)) {
+      spawnFloatingEmote(data.icon, data.color === 'w' ? 'w' : 'b');
+    }
   }
   else if (type === 'chat') {
-    const isMe = (data.color === myOnlineColor);
-    addChatMessage(data.sender, data.text, isMe ? 'me' : 'opp');
-    playSound('select');
+    if (!checkChatRateLimit()) return;
+    if (typeof data.text === 'string' && data.text.trim().length > 0) {
+      const sanitizedText = data.text.slice(0, 150);
+      const senderName = typeof data.sender === 'string' ? data.sender.slice(0, 25) : 'Đối thủ';
+      const isMe = (data.color === myOnlineColor);
+      addChatMessage(senderName, sanitizedText, isMe ? 'me' : 'opp');
+      playSound('select');
+    }
   }
 }
 
