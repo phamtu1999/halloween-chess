@@ -7,6 +7,9 @@ let gameMode = 'ai'; // 'ai', 'pvp', 'online'
 let aiDifficulty = 2; // 1: Easy, 2: Med, 3: Hard
 let playerSideAI = 'w'; // 'w' (White) or 'b' (Black)
 let soundEnabled = true;
+let renderQuality = (() => {
+  try { return localStorage.getItem('halloween_chess_quality') || 'auto'; } catch (e) { return 'auto'; }
+})();
 let isAnimating = false;
 let pendingPromotion = null;
 
@@ -40,6 +43,26 @@ const pieceInstances = {};
 
 let selectedSquare = null;
 let validMoves = [];
+
+function resolvedQuality() {
+  if (renderQuality !== 'auto') return renderQuality;
+  return window.matchMedia('(pointer: coarse)').matches ? 'low' : 'high';
+}
+
+function applyRenderQuality() {
+  if (!renderer) return;
+  const settings = { low: [0.75, false], medium: [1, true], high: [1.5, true] }[resolvedQuality()];
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, settings[0]));
+  renderer.shadowMap.enabled = settings[1];
+  const button = document.getElementById('btn-quality');
+  if (button) button.textContent = `⚙️ ${renderQuality === 'auto' ? 'Tự động' : renderQuality === 'low' ? 'Thấp' : renderQuality === 'medium' ? 'Vừa' : 'Cao'}`;
+}
+
+function cycleRenderQuality() {
+  renderQuality = ({ auto: 'low', low: 'medium', medium: 'high', high: 'auto' })[renderQuality] || 'auto';
+  try { localStorage.setItem('halloween_chess_quality', renderQuality); } catch (e) {}
+  applyRenderQuality();
+}
 
 // ── Sound Synth ──────────────────────────────────────────────────────────────
 const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -263,8 +286,7 @@ function initScene() {
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouchDevice, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1 : 1.5));
-  renderer.shadowMap.enabled = !isTouchDevice;
+  applyRenderQuality();
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
@@ -1933,6 +1955,7 @@ document.getElementById('btn-sound').onclick = function() {
   this.textContent = soundEnabled ? '🔊 Âm thanh' : '🔇 Tắt tiếng';
   showToast(soundEnabled ? 'Đã bật âm thanh' : 'Đã tắt âm thanh', 'info', soundEnabled ? '🔊' : '🔇');
 };
+document.getElementById('btn-quality').onclick = cycleRenderQuality;
 
 document.getElementById('btn-undo').onclick = () => {
   if (isAnimating) return;
