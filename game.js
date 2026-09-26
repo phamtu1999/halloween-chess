@@ -311,7 +311,24 @@ function initScene() {
   mouse = new THREE.Vector2();
 
   window.addEventListener('resize', onWindowResize);
-  canvas.addEventListener('pointerdown', onCanvasClick);
+
+  let pointerStartX = 0;
+  let pointerStartY = 0;
+  let pointerStartTime = 0;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    pointerStartX = e.clientX;
+    pointerStartY = e.clientY;
+    pointerStartTime = performance.now();
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    const dist = Math.hypot(e.clientX - pointerStartX, e.clientY - pointerStartY);
+    const elapsed = performance.now() - pointerStartTime;
+    if (dist < 12 && elapsed < 500) {
+      onCanvasClick(e);
+    }
+  });
 }
 
 function createEmbers() {
@@ -1135,6 +1152,7 @@ function handleWebSocketMessage(data) {
     if (myOnlineColor === 'w') setCameraPreset('white');
     else setCameraPreset('black');
 
+    closeDrawers();
     startClockTimer();
   }
   else if (type === 'move_made') {
@@ -1614,6 +1632,7 @@ function initOnlineGame(data, myColor) {
   if (myColor === 'w') setCameraPreset('white');
   else setCameraPreset('black');
 
+  closeDrawers();
   startClockTimer();
 }
 
@@ -1971,6 +1990,78 @@ function animate() {
 
   renderer.render(scene, camera);
 }
+
+// ── Mobile Drawer & Navigation Management ───────────────────────────────────
+function openDrawer(id) {
+  const leftDrawer = document.getElementById('sidebar-left');
+  const rightDrawer = document.getElementById('sidebar-right');
+  const backdrop = document.getElementById('mobile-backdrop');
+
+  if (id === 'left') {
+    if (leftDrawer) leftDrawer.classList.add('drawer-open');
+    if (rightDrawer) rightDrawer.classList.remove('drawer-open');
+  } else if (id === 'right') {
+    if (rightDrawer) rightDrawer.classList.add('drawer-open');
+    if (leftDrawer) leftDrawer.classList.remove('drawer-open');
+  }
+  if (backdrop) backdrop.classList.add('active');
+}
+
+function closeDrawers() {
+  const leftDrawer = document.getElementById('sidebar-left');
+  const rightDrawer = document.getElementById('sidebar-right');
+  const backdrop = document.getElementById('mobile-backdrop');
+  if (leftDrawer) leftDrawer.classList.remove('drawer-open');
+  if (rightDrawer) rightDrawer.classList.remove('drawer-open');
+  if (backdrop) backdrop.classList.remove('active');
+}
+
+function toggleDrawer(id) {
+  const drawer = (id === 'left') ? document.getElementById('sidebar-left') : document.getElementById('sidebar-right');
+  if (drawer && drawer.classList.contains('drawer-open')) {
+    closeDrawers();
+  } else {
+    openDrawer(id);
+  }
+}
+
+// Mobile Trigger & Backdrop Handlers
+const btnToggleMenu = document.getElementById('btn-toggle-menu');
+if (btnToggleMenu) btnToggleMenu.onclick = () => toggleDrawer('left');
+
+const btnToggleHistory = document.getElementById('btn-toggle-history');
+if (btnToggleHistory) btnToggleHistory.onclick = () => toggleDrawer('right');
+
+const btnCloseLeft = document.getElementById('btn-close-drawer-left');
+if (btnCloseLeft) btnCloseLeft.onclick = closeDrawers;
+
+const btnCloseRight = document.getElementById('btn-close-drawer-right');
+if (btnCloseRight) btnCloseRight.onclick = closeDrawers;
+
+const mobileBackdrop = document.getElementById('mobile-backdrop');
+if (mobileBackdrop) mobileBackdrop.onclick = closeDrawers;
+
+// Mobile Floating Quick Bottom Bar Handlers
+const mCamPersp = document.getElementById('m-cam-persp');
+if (mCamPersp) mCamPersp.onclick = () => setCameraPreset('persp');
+
+const mCamTop = document.getElementById('m-cam-top');
+if (mCamTop) mCamTop.onclick = () => setCameraPreset('top');
+
+const mCamWhite = document.getElementById('m-cam-white');
+if (mCamWhite) mCamWhite.onclick = () => setCameraPreset('white');
+
+const mCamBlack = document.getElementById('m-cam-black');
+if (mCamBlack) mCamBlack.onclick = () => setCameraPreset('black');
+
+const mBtnHint = document.getElementById('m-btn-hint');
+if (mBtnHint) mBtnHint.onclick = () => {
+  const hintBtn = document.getElementById('btn-ai-hint');
+  if (hintBtn) hintBtn.click();
+};
+
+const mBtnMenu = document.getElementById('m-btn-menu');
+if (mBtnMenu) mBtnMenu.onclick = () => toggleDrawer('left');
 
 window.onload = () => {
   try {

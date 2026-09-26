@@ -707,74 +707,304 @@
 
     #loading-text { font-size: 13px; color: rgba(255, 255, 255, 0.7); letter-spacing: 1px; }
 
-    @media (max-width: 900px) {
-      #ui-overlay {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto;
-        overflow-y: auto;
-      }
-      .sidebar { max-height: 240px; }
-    }
+    /* Mobile Drawer Components (Hidden on Desktop) */
+    .mobile-nav-btn { display: none; }
+    .drawer-header-mobile { display: none; }
+    #mobile-backdrop { display: none; }
+    #mobile-bottom-bar { display: none; }
 
-    @media (max-width: 600px) {
-      body { overflow: hidden; min-height: 100dvh; height: 100dvh; }
-      #ui-overlay {
-        position: relative;
-        display: block;
-        min-height: 100dvh;
-        width: 100%;
-        padding: 8px;
-        gap: 8px;
+    /* ── MOBILE & TABLET RESPONSIVE SYSTEM (<= 900px) ── */
+    @media (max-width: 900px) {
+      body {
         overflow: hidden;
-        pointer-events: none;
+        height: 100vh;
+        height: 100dvh;
+        touch-action: none;
       }
+
+      #webgl-canvas {
+        touch-action: none;
+      }
+
+      #ui-overlay {
+        display: block;
+        padding: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
+      /* Backdrop for active drawers */
+      #mobile-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        z-index: 40;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      #mobile-backdrop.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      /* Compact Header */
       header {
         position: fixed;
+        top: max(8px, env(safe-area-inset-top, 8px));
         left: 8px;
         right: 8px;
-        top: 8px;
-        width: calc(100% - 16px);
-        height: auto;
-        min-height: 0;
-        z-index: 20;
-        display: grid;
-        grid-template-columns: 1fr auto;
+        z-index: 30;
+        padding: 6px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         gap: 6px;
-        padding: 8px;
+        border-radius: 12px;
+        background: rgba(18, 11, 26, 0.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(244, 192, 66, 0.25);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
         pointer-events: auto;
       }
-      .title-group { min-width: 0; gap: 6px; }
-      .title-group h1 { font-size: 12px; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .turn-badge { display: none; }
-      .clock-group { grid-column: 1 / -1; justify-content: center; gap: 4px; }
-      .chess-clock { padding: 4px 7px; font-size: 11px; }
-      .btn-bar { justify-content: flex-end; gap: 4px; }
-      .btn-bar button { padding: 6px 7px; font-size: 10px; }
-      .btn-bar #btn-sound { display: none; }
+
+      .mobile-nav-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 8px;
+        font-size: 14px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(244, 192, 66, 0.3);
+        border-radius: 8px;
+        cursor: pointer;
+        min-width: 34px;
+        min-height: 34px;
+      }
+
+      .mobile-nav-btn:hover {
+        background: rgba(244, 192, 66, 0.2);
+        border-color: var(--gold);
+      }
+
+      .title-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex-shrink: 1;
+      }
+
+      .title-group h1 {
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .turn-badge {
+        padding: 4px 8px;
+        font-size: 11px;
+        gap: 5px;
+      }
+
+      .clock-group {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .chess-clock {
+        padding: 4px 8px;
+        font-size: 12px;
+        border-radius: 6px;
+      }
+
+      .btn-bar {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .btn-bar button {
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+
+      /* Sidebars transformed into Glassmorphism Bottom Sheet Drawers */
       .sidebar {
         position: fixed;
-        left: 8px;
-        right: 8px;
-        bottom: 8px;
+        left: 0;
+        right: 0;
+        bottom: 0;
         width: 100%;
-        min-width: 0;
-        width: calc(100% - 16px);
-        max-height: 42dvh;
-        padding: 10px;
-        gap: 8px;
-        overflow-y: auto;
-        z-index: 15;
+        max-width: 100vw;
+        max-height: 78vh;
+        max-height: 78dvh;
+        border-radius: 20px 20px 0 0;
+        background: rgba(18, 11, 26, 0.97);
+        border: 1px solid rgba(244, 192, 66, 0.35);
+        border-bottom: none;
+        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.85), 0 0 30px rgba(168, 66, 244, 0.2);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        z-index: 50;
+        transform: translateY(105%);
+        transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         pointer-events: auto;
+        overflow-y: auto;
+        padding: 16px;
+        padding-bottom: max(24px, env(safe-area-inset-bottom, 24px));
       }
-      .sidebar:last-of-type { display: none; }
-      .mode-btn { min-height: 38px; font-size: 10px; }
-      button, select, input { min-height: 38px; }
-      .camera-presets { grid-template-columns: repeat(3, 1fr); }
-      .emotes-bar { grid-template-columns: repeat(4, 1fr); }
-      .move-history { max-height: 180px; }
-      #chat-messages { max-height: 180px; }
-      #loading-screen { padding: 20px; }
-      .progress-bar-wrap { width: min(280px, 80vw); }
+
+      .sidebar.drawer-open {
+        transform: translateY(0);
+      }
+
+      .drawer-header-mobile {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid rgba(244, 192, 66, 0.25);
+      }
+
+      .drawer-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: var(--gold);
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+      }
+
+      .drawer-close-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #fff;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .drawer-close-btn:hover {
+        background: rgba(244, 43, 66, 0.3);
+        border-color: var(--red);
+      }
+
+      /* Floating Bottom Quick Action Bar */
+      #mobile-bottom-bar {
+        display: flex;
+        position: fixed;
+        bottom: max(12px, env(safe-area-inset-bottom, 12px));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 25;
+        gap: 6px;
+        padding: 5px 8px;
+        background: rgba(18, 11, 26, 0.88);
+        border: 1px solid rgba(244, 192, 66, 0.3);
+        border-radius: 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 15px rgba(168, 66, 244, 0.2);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        pointer-events: auto;
+        width: max-content;
+        max-width: calc(100vw - 20px);
+        overflow-x: auto;
+      }
+
+      .m-bar-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(244, 192, 66, 0.25);
+        color: var(--text);
+        padding: 6px 10px;
+        border-radius: 14px;
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+        transition: all 0.2s;
+      }
+
+      .m-bar-btn:active {
+        transform: scale(0.95);
+        background: rgba(244, 192, 66, 0.25);
+      }
+
+      .m-bar-btn.primary {
+        background: linear-gradient(135deg, rgba(255, 123, 26, 0.4), rgba(168, 66, 244, 0.4));
+        border-color: var(--orange);
+      }
+
+      /* Toast on mobile */
+      #toast-container {
+        top: 68px;
+        right: 10px;
+        left: 10px;
+        align-items: center;
+      }
+
+      .toast-msg {
+        width: 100%;
+        max-width: 360px;
+        padding: 8px 14px;
+        font-size: 12px;
+      }
+    }
+
+    /* ── Extra small screens (<= 480px) ── */
+    @media (max-width: 480px) {
+      header {
+        padding: 5px 8px;
+        gap: 4px;
+      }
+
+      .title-group h1 {
+        font-size: 11px;
+        max-width: 76px;
+      }
+
+      .turn-badge {
+        display: none;
+      }
+
+      .chess-clock {
+        padding: 3px 6px;
+        font-size: 11px;
+      }
+
+      .btn-bar #btn-sound {
+        display: none;
+      }
+
+      .btn-bar #btn-undo {
+        display: none;
+      }
+
+      .btn-bar button {
+        padding: 4px 6px;
+        font-size: 10px;
+      }
+
+      #mobile-bottom-bar {
+        gap: 4px;
+        padding: 4px 6px;
+      }
+
+      .m-bar-btn {
+        padding: 5px 8px;
+        font-size: 10px;
+      }
     }
   </style>
 
@@ -797,15 +1027,18 @@
     <div id="loading-text">Đang triệu hồi các quân cờ Ma Quái 3D...</div>
   </div>
 
+  <div id="mobile-backdrop"></div>
+
   <div id="ui-overlay">
     
     <!-- Header -->
     <header class="interactive">
       <div class="title-group">
-        <h1>🎃 HALLOWEEN CHESS 3D</h1>
+        <button id="btn-toggle-menu" class="mobile-nav-btn" title="Cài đặt & Chế độ">⚙️</button>
+        <h1>🎃 HALLOWEEN CHESS</h1>
         <div id="turn-display" class="turn-badge white">
           <div class="turn-dot"></div>
-          <span id="turn-text">Lượt Trắng (Ghost Bone)</span>
+          <span id="turn-text">Lượt Trắng</span>
         </div>
       </div>
 
@@ -816,14 +1049,20 @@
       </div>
 
       <div class="btn-bar">
-        <button id="btn-sound">🔊 Âm thanh</button>
-        <button id="btn-undo">↩ Đi lại</button>
-        <button id="btn-restart" class="primary">🔄 Ván mới</button>
+        <button id="btn-sound" title="Âm thanh">🔊 Âm thanh</button>
+        <button id="btn-undo" title="Lùi 1 nước">↩ Đi lại</button>
+        <button id="btn-restart" class="primary" title="Ván mới">🔄 Ván mới</button>
+        <button id="btn-toggle-history" class="mobile-nav-btn" title="Lịch sử & Chat">📜</button>
       </div>
     </header>
 
-    <!-- Left Sidebar -->
-    <div class="sidebar interactive">
+    <!-- Left Sidebar / Mobile Drawer 1 -->
+    <div id="sidebar-left" class="sidebar interactive">
+      <div class="drawer-header-mobile">
+        <span class="drawer-title">⚙️ CÀI ĐẶT & CHẾ ĐỘ</span>
+        <button class="drawer-close-btn" id="btn-close-drawer-left">✕ Đóng</button>
+      </div>
+
       <div>
         <div class="section-title">Chế độ chơi</div>
         <div class="mode-select">
@@ -964,8 +1203,13 @@
 
     <div></div>
 
-    <!-- Right Sidebar -->
-    <div class="sidebar interactive">
+    <!-- Right Sidebar / Mobile Drawer 2 -->
+    <div id="sidebar-right" class="sidebar interactive">
+      <div class="drawer-header-mobile">
+        <span class="drawer-title">📜 LỊCH SỬ & TRÒ CHUYỆN</span>
+        <button class="drawer-close-btn" id="btn-close-drawer-right">✕ Đóng</button>
+      </div>
+
       <div>
         <div class="section-title">Nghĩa địa Quân cờ đã bắt</div>
         <div class="graveyard-panel">
@@ -997,6 +1241,16 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- Mobile Floating Quick Bottom Bar -->
+  <div id="mobile-bottom-bar" class="interactive">
+    <button class="m-bar-btn" id="m-cam-persp">🎮 3D</button>
+    <button class="m-bar-btn" id="m-cam-top">🔝 2D</button>
+    <button class="m-bar-btn" id="m-cam-white">⚪ Trắng</button>
+    <button class="m-bar-btn" id="m-cam-black">⚫ Đen</button>
+    <button class="m-bar-btn primary" id="m-btn-hint">💡 Gợi ý</button>
+    <button class="m-bar-btn" id="m-btn-menu">⚙️ Menu</button>
   </div>
 
   <!-- Toast Container -->
