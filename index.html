@@ -720,7 +720,7 @@
       body { overflow: hidden; min-height: 100dvh; height: 100dvh; }
       #ui-overlay {
         position: relative;
-        display: flex;
+        display: block;
         min-height: 100dvh;
         width: 100%;
         padding: 8px;
@@ -729,8 +729,13 @@
         pointer-events: none;
       }
       header {
-        position: sticky;
+        position: fixed;
+        left: 8px;
+        right: 8px;
         top: 8px;
+        width: calc(100% - 16px);
+        height: auto;
+        min-height: 0;
         z-index: 20;
         display: grid;
         grid-template-columns: 1fr auto;
