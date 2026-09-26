@@ -254,23 +254,24 @@ function worldToSquare(worldPos) {
 
 function initScene() {
   const canvas = document.getElementById('webgl-canvas');
+  const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0610);
   scene.fog = new THREE.FogExp2(0x0a0610, 0.05);
 
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouchDevice, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-  renderer.shadowMap.enabled = true;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1 : 1.5));
+  renderer.shadowMap.enabled = !isTouchDevice;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
+  controls.dampingFactor = isTouchDevice ? 0.1 : 0.05;
   controls.maxPolarAngle = Math.PI / 2 - 0.05;
   controls.minDistance = 2.5;
   controls.maxDistance = 15;
@@ -292,7 +293,7 @@ function initScene() {
 
   const torchKey = new THREE.DirectionalLight(0xff7b1a, 2.2);
   torchKey.position.set(4, 6, 5);
-  torchKey.castShadow = true;
+  torchKey.castShadow = !isTouchDevice;
   torchKey.shadow.mapSize.width = 1024;
   torchKey.shadow.mapSize.height = 1024;
   scene.add(torchKey);
@@ -332,7 +333,7 @@ function initScene() {
 }
 
 function createEmbers() {
-  const count = 120;
+  const count = window.matchMedia('(pointer: coarse)').matches ? 50 : 120;
   const geom = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count * 3; i += 3) {
