@@ -33,8 +33,6 @@ def is_origin_allowed(origin: str) -> bool:
     origin_clean = origin.rstrip("/").lower()
     if origin_clean in ALLOWED_ORIGINS:
         return True
-    if origin_clean.endswith(".vercel.app"):
-        return True
     if origin_clean.startswith("http://localhost:") or origin_clean.startswith("http://127.0.0.1:"):
         return True
     return False
@@ -197,6 +195,12 @@ async def ws_handler(websocket, path=None):
 
             # 1. CREATE CUSTOM ROOM
             if action == "create_room":
+                if current_room:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Bạn đã ở trong một phòng!"
+                    }))
+                    continue
                 try:
                     time_ctl = int(data.get("time_control", 300))
                     if time_ctl not in [0, 60, 180, 300, 600, 900, 1800]:
@@ -516,6 +520,10 @@ async def ws_handler(websocket, path=None):
 
         if room:
             opp_ws = room.get_opponent(websocket)
+            if room.white_ws == websocket:
+                room.white_ws = None
+            if room.black_ws == websocket:
+                room.black_ws = None
             if opp_ws and not opp_ws.closed:
                 await opp_ws.send(json.dumps({
                     "type": "opponent_disconnected",

@@ -1489,23 +1489,11 @@ async function handlePeerMessage(data, conn) {
 
     executeMove(data.from, data.to, promo, false);
 
-    if (typeof data.white_time === 'number' && typeof data.black_time === 'number') {
-      const wDiff = Math.abs(whiteRemaining - data.white_time);
-      const bDiff = Math.abs(blackRemaining - data.black_time);
-      if (wDiff <= 5) whiteRemaining = Math.max(0, data.white_time);
-      if (bDiff <= 5) blackRemaining = Math.max(0, data.black_time);
-    }
     updateUI();
   }
   else if (type === 'time_sync') {
     if (!onlineActive || isHost) return;
-    if (typeof data.white_time === 'number' && typeof data.black_time === 'number') {
-      const wDiff = Math.abs(whiteRemaining - data.white_time);
-      const bDiff = Math.abs(blackRemaining - data.black_time);
-      if (wDiff <= 5) whiteRemaining = Math.max(0, data.white_time);
-      if (bDiff <= 5) blackRemaining = Math.max(0, data.black_time);
-      updateUI();
-    }
+    updateUI();
   }
   else if (type === 'game_over') {
     if (!onlineActive) return;
