@@ -717,16 +717,16 @@
     }
 
     @media (max-width: 600px) {
-      body { overflow: auto; min-height: 100dvh; height: auto; }
+      body { overflow: hidden; min-height: 100dvh; height: 100dvh; }
       #ui-overlay {
         position: relative;
         display: flex;
-        flex-direction: column;
         min-height: 100dvh;
         width: 100%;
         padding: 8px;
         gap: 8px;
-        overflow: visible;
+        overflow: hidden;
+        pointer-events: none;
       }
       header {
         position: sticky;
@@ -736,6 +736,7 @@
         grid-template-columns: 1fr auto;
         gap: 6px;
         padding: 8px;
+        pointer-events: auto;
       }
       .title-group { min-width: 0; gap: 6px; }
       .title-group h1 { font-size: 12px; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -746,15 +747,21 @@
       .btn-bar button { padding: 6px 7px; font-size: 10px; }
       .btn-bar #btn-sound { display: none; }
       .sidebar {
+        position: fixed;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
         width: 100%;
         min-width: 0;
-        max-height: none;
+        width: calc(100% - 16px);
+        max-height: 42dvh;
         padding: 10px;
         gap: 8px;
-        overflow: visible;
+        overflow-y: auto;
+        z-index: 15;
+        pointer-events: auto;
       }
-      .sidebar:first-of-type { order: 1; }
-      .sidebar:last-of-type { order: 2; }
+      .sidebar:last-of-type { display: none; }
       .mode-btn { min-height: 38px; font-size: 10px; }
       button, select, input { min-height: 38px; }
       .camera-presets { grid-template-columns: repeat(3, 1fr); }
