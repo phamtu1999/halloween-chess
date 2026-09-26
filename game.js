@@ -888,7 +888,6 @@ document.getElementById('banner-ok-btn').onclick = () => {
 document.getElementById('banner-rematch-btn').onclick = () => {
   document.getElementById('banner-modal').style.display = 'none';
   if (gameMode === 'online') {
-    rematchRequestedByMe = true;
     sendPeerMsg({ type: 'rematch_request' });
     addChatMessage('Hệ thống', 'Đã gửi yêu cầu tái đấu...', 'sys');
     showToast('Đã gửi lời mời tái đấu tới đối thủ!', 'info', '🔄');
@@ -988,9 +987,232 @@ function getMyPlayerName() {
   return name;
 }
 
-function sendPeerMsg(obj) {
-  if (peerConn && peerConn.open) {
+let wsClient = null;
+let lockedRemotePeerId = null;
+let drawOfferedByMe = false;
+let rematchRequestedByMe = false;
+let lastEmoteTime = 0;
+let emoteCountWindow = 0;
+let lastChatTime = 0;
+let chatCountWindow = 0;
+
+function checkEmoteRateLimit() {
+  const now = Date.now();
+  if (now - lastEmoteTime > 3000) {
+    lastEmoteTime = now;
+    emoteCountWindow = 0;
+  }
+  emoteCountWindow++;
+  return emoteCountWindow <= 6;
+}
+
+function checkChatRateLimit() {
+  const now = Date.now();
+  if (now - lastChatTime > 3000) {
+    lastChatTime = now;
+    chatCountWindow = 0;
+  }
+  chatCountWindow++;
+  return chatCountWindow <= 6;
+}
+
+function getWebSocketUrl() {
+  const isHttps = window.location.protocol === 'https:';
+  const host = window.location.hostname || 'localhost';
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'ws://localhost:8081';
+  }
+  return (isHttps ? 'wss://' : 'ws://') + host + ':8081';
+}
+
+function initWebSocketClient() {
+  if (wsClient && (wsClient.readyState === WebSocket.OPEN || wsClient.readyState === WebSocket.CONNECTING)) {
+    return Promise.resolve(wsClient);
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      const url = getWebSocketUrl();
+      const ws = new WebSocket(url);
+      
+      ws.onopen = () => {
+        console.log('⚡ Connected to Authoritative WebSocket Server:', url);
+        wsClient = ws;
+        resolve(ws);
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          handleWebSocketMessage(data);
+        } catch(e){}
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        if (onlineActive) {
+          onlineActive = false;
+          stopClockTimer();
+          updateOnlineBadge('🔴 Máy chủ WebSocket ngắt kết nối');
+          showToast('Mất kết nối máy chủ!', 'error', '⚠️');
+        }
+        wsClient = null;
+      };
+
+      ws.onerror = (err) => {
+        console.warn('WebSocket error / offline:', err);
+        wsClient = null;
+        reject(err);
+      };
+    } catch(err) {
+      reject(err);
+    }
+  });
+}
+
+function sendOnlineMsg(obj) {
+  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+    const action = obj.action || (obj.type === 'move' ? 'move' : 
+                   obj.type === 'resign' ? 'resign' : 
+                   obj.type === 'offer_draw' ? 'offer_draw' : 
+                   obj.type === 'draw_response' ? 'draw_response' : 
+                   obj.type === 'rematch_request' ? 'rematch' : 
+                   obj.type === 'chat' ? 'chat' : 
+                   obj.type === 'emote' ? 'emote' : obj.type);
+    wsClient.send(JSON.stringify({ ...obj, action }));
+  } else if (peerConn && peerConn.open) {
     peerConn.send(obj);
+  }
+}
+
+function sendPeerMsg(obj) {
+  sendOnlineMsg(obj);
+}
+
+function handleWebSocketMessage(data) {
+  if (!data || typeof data !== 'object') return;
+  const type = data.type;
+
+  if (type === 'room_created') {
+    currentRoomId = data.room_id;
+    myOnlineColor = data.color;
+    document.getElementById('display-room-id').textContent = currentRoomId;
+    document.getElementById('room-info-box').style.display = 'block';
+    updateOnlineBadge(`🟡 Phòng ${currentRoomId} (Chờ đối thủ)`);
+    addChatMessage('Hệ thống', `Đã mở phòng ${currentRoomId}. Hãy gửi mã cho đối thủ!`, 'sys');
+    showToast(`Đã tạo phòng ${currentRoomId}!`, 'success', '🏰');
+  }
+  else if (type === 'queue_waiting') {
+    updateOnlineBadge('🔍 Đang tìm kiếm đối thủ...');
+    showToast(data.message || 'Đang tìm kiếm đối thủ...', 'info', '⏳');
+  }
+  else if (type === 'game_start') {
+    currentRoomId = data.room_id || currentRoomId;
+    onlineActive = true;
+    whitePlayerName = data.white_name || 'Trắng';
+    blackPlayerName = data.black_name || 'Đen';
+    timeControl = data.time_control || 300;
+    whiteRemaining = data.white_time != null ? data.white_time : timeControl;
+    blackRemaining = data.black_time != null ? data.black_time : timeControl;
+
+    const myName = getMyPlayerName();
+    if (!myOnlineColor) {
+      myOnlineColor = (whitePlayerName === myName) ? 'w' : 'b';
+    }
+
+    chess.reset();
+    syncBoardFromChess();
+    clearSelection();
+    updateUI();
+
+    document.getElementById('in-game-actions').style.display = 'block';
+    document.getElementById('chat-section').style.display = 'flex';
+    document.getElementById('room-info-box').style.display = 'none';
+    updateOnlineBadge(`🟢 Đang đấu: ${currentRoomId}`);
+    
+    addChatMessage('Hệ thống', `Trận đấu bắt đầu! ⚪ ${whitePlayerName} vs ⚫ ${blackPlayerName}`, 'sys');
+    showToast('Đối thủ đã vào bàn! Bắt đầu trận đấu!', 'success', '⚔️');
+
+    if (myOnlineColor === 'w') setCameraPreset('white');
+    else setCameraPreset('black');
+
+    startClockTimer();
+  }
+  else if (type === 'move_made') {
+    executeMove(data.from, data.to, data.promo || 'q', false);
+    if (data.white_time != null) whiteRemaining = data.white_time;
+    if (data.black_time != null) blackRemaining = data.black_time;
+    updateUI();
+  }
+  else if (type === 'time_sync') {
+    if (data.white_time != null) whiteRemaining = data.white_time;
+    if (data.black_time != null) blackRemaining = data.black_time;
+    updateUI();
+  }
+  else if (type === 'game_over') {
+    onlineActive = false;
+    stopClockTimer();
+    let title = 'KẾT THÚC TRẬN ĐẤU';
+    let desc = '';
+    if (data.reason === 'timeout') {
+      const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
+      desc = `${winName} chiến thắng do đối thủ hết giờ!`;
+      title = 'HẾT GIỜ!';
+    } else if (data.reason === 'resigned') {
+      const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
+      desc = `${winName} chiến thắng do đối thủ đầu hàng!`;
+      title = (data.winner === myOnlineColor) ? 'CHIẾN THẮNG!' : 'KẾT THÚC';
+    } else if (data.reason === 'checkmate') {
+      const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
+      desc = `${winName} chiến thắng bằng chiếu bí!`;
+      title = (data.winner === myOnlineColor) ? 'CHIẾN THẮNG!' : 'THẤT BẠI';
+    } else if (data.reason === 'draw' || data.reason === 'draw_agreed') {
+      desc = 'Trận đấu kết thúc với kết quả Hòa.';
+      title = 'HÒA CỜ';
+    }
+    showBanner(title, desc, true);
+    addChatMessage('Hệ thống', desc, 'sys');
+  }
+  else if (type === 'draw_offered') {
+    playSound('check');
+    showCustomConfirm('LỜI MỜI HÒA CỜ', 'Đối thủ gửi lời xin hòa cờ. Bạn có đồng ý kết thúc hòa không?', '🤝', 'Đồng ý hòa', 'Từ chối').then(ok => {
+      sendOnlineMsg({ action: 'draw_response', accept: ok });
+      if (ok) {
+        onlineActive = false;
+        stopClockTimer();
+        showBanner('HÒA CỜ', 'Hai bên đã đồng ý hòa cờ.', true);
+        addChatMessage('Hệ thống', 'Trận đấu kết thúc với kết quả Hòa.', 'sys');
+      }
+    });
+  }
+  else if (type === 'draw_declined') {
+    addChatMessage('Hệ thống', 'Đối thủ đã từ chối lời xin hòa.', 'sys');
+    showToast('Đối thủ từ chối hòa cờ!', 'error', '❌');
+  }
+  else if (type === 'rematch_requested') {
+    playSound('win');
+    showCustomConfirm('YÊU CẦU TÁI ĐẤU', 'Đối thủ muốn tái đấu (sẽ đổi phe Trắng / Đen). Bạn có đồng ý không?', '🔄', 'Chấp nhận', 'Từ chối').then(ok => {
+      if (ok) {
+        sendOnlineMsg({ action: 'rematch' });
+      }
+    });
+  }
+  else if (type === 'emote_sent') {
+    spawnFloatingEmote(data.icon, data.color);
+  }
+  else if (type === 'chat_msg') {
+    const isMe = (data.color === myOnlineColor);
+    addChatMessage(data.sender, data.text, isMe ? 'me' : 'opp');
+    playSound('select');
+  }
+  else if (type === 'opponent_disconnected') {
+    onlineActive = false;
+    stopClockTimer();
+    updateOnlineBadge('🔴 Đối thủ đã mất kết nối');
+    addChatMessage('Hệ thống', 'Đối thủ đã mất kết nối khỏi máy chủ.', 'sys');
+    showToast('Đối thủ đã rời phòng!', 'error', '⚠️');
+  }
+  else if (type === 'error') {
+    showToast(data.message || 'Lỗi từ máy chủ!', 'error', '⚠️');
   }
 }
 
@@ -1012,7 +1234,7 @@ function startClockTimer() {
     }
     updateUI();
 
-    // If host, sync clocks to guest every second
+    // In P2P host mode, sync clocks to guest
     if (isHost && peerConn && peerConn.open) {
       sendPeerMsg({
         type: 'time_sync',
@@ -1069,6 +1291,7 @@ function getPeerRoomInfo(rawCode) {
 
 function createRoomP2P(timeCtl, colorPref) {
   stopClockTimer();
+  lockedRemotePeerId = null;
   if (peerConn) { try { peerConn.close(); } catch(e){} peerConn = null; }
   if (peer) { try { peer.destroy(); } catch(e){} peer = null; }
 
@@ -1096,7 +1319,11 @@ function createRoomP2P(timeCtl, colorPref) {
     });
 
     peer.on('connection', (conn) => {
-      console.log('Incoming guest connection...');
+      if (peerConn && peerConn.open && lockedRemotePeerId && conn.peer !== lockedRemotePeerId) {
+        console.warn('Rejecting extra incoming connection from:', conn.peer);
+        try { conn.close(); } catch(e){}
+        return;
+      }
       peerConn = conn;
       setupPeerConnectionHandlers(conn);
     });
@@ -1117,6 +1344,7 @@ function createRoomP2P(timeCtl, colorPref) {
 
 function joinRoomP2P(roomCode) {
   stopClockTimer();
+  lockedRemotePeerId = null;
   if (peerConn) { try { peerConn.close(); } catch(e){} peerConn = null; }
   if (peer) { try { peer.destroy(); } catch(e){} peer = null; }
 
@@ -1150,7 +1378,13 @@ function joinRoomP2P(roomCode) {
 
 function setupPeerConnectionHandlers(conn) {
   conn.on('open', () => {
-    console.log('P2P DataConnection connected successfully!');
+    if (lockedRemotePeerId && lockedRemotePeerId !== conn.peer) {
+      console.warn('Rejecting connection from unverified peer:', conn.peer);
+      try { conn.close(); } catch(e){}
+      return;
+    }
+    lockedRemotePeerId = conn.peer;
+    console.log('P2P DataConnection locked to peer:', lockedRemotePeerId);
     if (!isHost) {
       conn.send({
         type: 'guest_hello',
@@ -1160,13 +1394,14 @@ function setupPeerConnectionHandlers(conn) {
   });
 
   conn.on('data', async (data) => {
-    await handlePeerMessage(data);
+    await handlePeerMessage(data, conn);
   });
 
   conn.on('close', () => {
     console.log('P2P connection closed');
     onlineActive = false;
     stopClockTimer();
+    lockedRemotePeerId = null;
     updateOnlineBadge('🔴 Đối thủ đã ngắt kết nối');
     addChatMessage('Hệ thống', 'Đối thủ đã rời khỏi phòng đấu.', 'sys');
     showToast('Đối thủ đã rời phòng!', 'error', '⚠️');
@@ -1178,42 +1413,16 @@ function setupPeerConnectionHandlers(conn) {
   });
 }
 
-let drawOfferedByMe = false;
-let rematchRequestedByMe = false;
-let lastEmoteTime = 0;
-let emoteCountWindow = 0;
-let lastChatTime = 0;
-let chatCountWindow = 0;
-
-function checkEmoteRateLimit() {
-  const now = Date.now();
-  if (now - lastEmoteTime > 3000) {
-    lastEmoteTime = now;
-    emoteCountWindow = 0;
-  }
-  emoteCountWindow++;
-  return emoteCountWindow <= 6;
-}
-
-function checkChatRateLimit() {
-  const now = Date.now();
-  if (now - lastChatTime > 3000) {
-    lastChatTime = now;
-    chatCountWindow = 0;
-  }
-  chatCountWindow++;
-  return chatCountWindow <= 6;
-}
-
-async function handlePeerMessage(data) {
+async function handlePeerMessage(data, conn) {
   if (!data || typeof data !== 'object') return;
+  if (conn && lockedRemotePeerId && conn.peer !== lockedRemotePeerId) {
+    console.warn('Rejected P2P packet from unverified peer:', conn.peer);
+    return;
+  }
   const type = data.type;
 
   if (type === 'guest_hello' && isHost) {
-    if (onlineActive) {
-      console.warn('Ignoring duplicate guest_hello while match is active');
-      return;
-    }
+    if (onlineActive) return;
     const guestName = (typeof data.name === 'string' ? data.name.trim().slice(0, 25) : '') || 'Khách';
     const hostName = getMyPlayerName();
 
@@ -1263,18 +1472,13 @@ async function handlePeerMessage(data) {
     if (!onlineActive || chess.game_over()) return;
     if (typeof data.from !== 'string' || typeof data.to !== 'string') return;
     
-    // Authorization: Verify it's opponent's turn
     const currentTurn = chess.turn();
-    if (currentTurn === myOnlineColor) {
-      console.warn('Received move while it is my turn; ignoring');
-      return;
-    }
+    if (currentTurn === myOnlineColor) return;
     
     const promo = (typeof data.promo === 'string' && ['q', 'r', 'b', 'n'].includes(data.promo.toLowerCase()))
       ? data.promo.toLowerCase()
       : 'q';
 
-    // Verify move legality locally
     const testMove = chess.move({ from: data.from, to: data.to, promotion: promo });
     if (!testMove) {
       console.warn('Illegal move received from peer:', data);
@@ -1285,7 +1489,6 @@ async function handlePeerMessage(data) {
 
     executeMove(data.from, data.to, promo, false);
 
-    // Controlled timer synchronization (tolerance <= 5s)
     if (typeof data.white_time === 'number' && typeof data.black_time === 'number') {
       const wDiff = Math.abs(whiteRemaining - data.white_time);
       const bDiff = Math.abs(blackRemaining - data.black_time);
@@ -1309,10 +1512,7 @@ async function handlePeerMessage(data) {
     if (data.reason === 'timeout') {
       const timedOutColor = (data.winner === 'w') ? 'b' : 'w';
       const rem = (timedOutColor === 'w') ? whiteRemaining : blackRemaining;
-      if (rem > 3) {
-        console.warn('Rejected timeout game_over because local timer has remaining time:', rem);
-        return;
-      }
+      if (rem > 3) return;
       onlineActive = false;
       stopClockTimer();
       const winName = data.winner === 'w' ? whitePlayerName : blackPlayerName;
@@ -1376,10 +1576,7 @@ async function handlePeerMessage(data) {
     }
   }
   else if (type === 'rematch_start') {
-    if (!rematchRequestedByMe) {
-      console.warn('Ignoring unrequested rematch_start');
-      return;
-    }
+    if (!rematchRequestedByMe) return;
     rematchRequestedByMe = false;
     myOnlineColor = (myOnlineColor === 'w') ? 'b' : 'w';
     whiteRemaining = timeControl;
@@ -1476,63 +1673,69 @@ function checkUrlParams() {
   const roomId = params.get('room');
   if (roomId) {
     document.getElementById('mode-online').click();
-    setTimeout(() => {
-      joinRoomP2P(roomId);
+    setTimeout(async () => {
+      try {
+        const ws = await initWebSocketClient();
+        ws.send(JSON.stringify({ action: 'join_room', room_id: roomId.toUpperCase(), name: getMyPlayerName() }));
+      } catch(e) {
+        joinRoomP2P(roomId);
+      }
     }, 500);
   }
 }
 
 // ── Event Handlers: Online Section ───────────────────────────────────────────
-document.getElementById('btn-quick-match').onclick = () => {
+document.getElementById('btn-quick-match').onclick = async () => {
   const timeCtl = parseInt(document.getElementById('select-time-control').value);
-  showToast('Đang kết nối sảnh công cộng...', 'info', '🔍');
-  
-  const publicRoomId = 'HLW-PUBLIC';
-  const hostPeerId = `hlw-chess-${publicRoomId.toLowerCase()}`;
-  
+  showToast('Đang tìm kiếm đối thủ...', 'info', '🔍');
   updateOnlineBadge('🔍 Đang tìm kiếm đối thủ...');
-  
+
   try {
-    peer = new Peer(PEER_CONFIG);
-    let joined = false;
-    
-    peer.on('open', () => {
-      const conn = peer.connect(hostPeerId, { reliable: true });
-      
-      conn.on('open', () => {
-        joined = true;
-        peerConn = conn;
-        isHost = false;
-        currentRoomId = publicRoomId;
-        setupPeerConnectionHandlers(conn);
-        showToast('Đã tìm thấy đối thủ!', 'success', '⚔️');
-      });
-      
-      setTimeout(() => {
-        if (!joined) {
-          try { conn.close(); } catch(e){}
-          try { peer.destroy(); } catch(e){}
-          createRoomP2P(timeCtl, 'random');
-          updateOnlineBadge('🔍 Đang đợi người vào ghép trận...');
-          showToast('Đã tạo sảnh chờ, đang đợi đối thủ...', 'info', '⏳');
-        }
-      }, 1600);
-    });
-  } catch(e){
+    const ws = await initWebSocketClient();
+    ws.send(JSON.stringify({
+      action: 'quick_match',
+      time_control: timeCtl,
+      name: getMyPlayerName()
+    }));
+  } catch(err) {
+    console.warn('WebSocket unavailable, creating P2P room...', err);
     createRoomP2P(timeCtl, 'random');
   }
 };
 
-document.getElementById('btn-create-room').onclick = () => {
+document.getElementById('btn-create-room').onclick = async () => {
   const timeCtl = parseInt(document.getElementById('select-time-control').value);
   const prefColor = document.getElementById('select-color').value;
-  createRoomP2P(timeCtl, prefColor);
+
+  try {
+    const ws = await initWebSocketClient();
+    ws.send(JSON.stringify({
+      action: 'create_room',
+      time_control: timeCtl,
+      color: prefColor,
+      name: getMyPlayerName()
+    }));
+  } catch(err) {
+    console.warn('WebSocket unavailable, creating P2P room...', err);
+    createRoomP2P(timeCtl, prefColor);
+  }
 };
 
 document.getElementById('btn-join-modal').onclick = async () => {
   const code = await showCustomPrompt('VÀO PHÒNG ĐẤU', 'Nhập mã phòng cờ 6 ký tự để tham chiến:', 'HLW-XXXX', '', '🔑');
-  if (code && code.trim()) {
-    joinRoomP2P(code.trim());
+  if (!code || !code.trim()) return;
+  const cleanCode = code.trim().toUpperCase();
+
+  try {
+    const ws = await initWebSocketClient();
+    ws.send(JSON.stringify({
+      action: 'join_room',
+      room_id: cleanCode,
+      name: getMyPlayerName()
+    }));
+  } catch(err) {
+    console.warn('WebSocket unavailable, joining P2P room...', err);
+    joinRoomP2P(cleanCode);
   }
 };
 
@@ -1551,21 +1754,20 @@ document.getElementById('btn-copy-code').onclick = () => {
 
 document.getElementById('btn-resign').onclick = async () => {
   const ok = await showCustomConfirm('ĐẦU HÀNG', 'Bạn có chắc chắn muốn đầu hàng đối thủ trong ván này không?', '🏳️', 'Đầu hàng', 'Tiếp tục đấu');
-  if (ok) {
-    if (gameMode === 'online') {
-      sendPeerMsg({ type: 'resign' });
-      onlineActive = false;
-      stopClockTimer();
-      const oppName = (myOnlineColor === 'w') ? blackPlayerName : whitePlayerName;
-      showBanner('KẾT THÚC', `Bạn đã đầu hàng. ${oppName} giành chiến thắng!`, true);
-      addChatMessage('Hệ thống', 'Bạn đã đầu hàng.', 'sys');
-    }
+  if (ok && gameMode === 'online') {
+    sendOnlineMsg({ type: 'resign' });
+    onlineActive = false;
+    stopClockTimer();
+    const oppName = (myOnlineColor === 'w') ? blackPlayerName : whitePlayerName;
+    showBanner('KẾT THÚC', `Bạn đã đầu hàng. ${oppName} giành chiến thắng!`, true);
+    addChatMessage('Hệ thống', 'Bạn đã đầu hàng.', 'sys');
   }
 };
 
 document.getElementById('btn-offer-draw').onclick = () => {
-  if (gameMode === 'online') {
-    sendPeerMsg({ type: 'offer_draw' });
+  if (gameMode === 'online' && onlineActive) {
+    drawOfferedByMe = true;
+    sendOnlineMsg({ type: 'offer_draw' });
     addChatMessage('Hệ thống', 'Đã gửi lời xin hòa tới đối thủ...', 'sys');
     showToast('Đã gửi lời xin hòa!', 'info', '🤝');
   }

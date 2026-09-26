@@ -27,6 +27,18 @@ ALLOWED_ORIGINS = {
     "https://phamtu1999.github.io",
 }
 
+def is_origin_allowed(origin: str) -> bool:
+    if not origin:
+        return True # Allow direct tools / dev scripts without Origin header
+    origin_clean = origin.rstrip("/").lower()
+    if origin_clean in ALLOWED_ORIGINS:
+        return True
+    if origin_clean.endswith(".vercel.app"):
+        return True
+    if origin_clean.startswith("http://localhost:") or origin_clean.startswith("http://127.0.0.1:"):
+        return True
+    return False
+
 # ── Cryptographic Room ID Generation ──────────────────────────────────────────
 ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
@@ -35,6 +47,7 @@ def generate_room_id(length=6):
 
 # ── Game Rooms & State ────────────────────────────────────────────────────────
 rooms = {}       # room_id -> GameRoom instance
+ws_to_room = {}  # websocket -> GameRoom instance (P0-5: bidirectional mapping)
 quick_queue = [] # list of (websocket, time_control, player_name)
 
 class GameRoom:
@@ -148,7 +161,6 @@ ws_message_counts = defaultdict(list)
 def is_rate_limited(ws, max_per_second=10):
     now = time.monotonic()
     timestamps = ws_message_counts[id(ws)]
-    # Keep timestamps within the last 1.0 second
     ws_message_counts[id(ws)] = [t for t in timestamps if now - t < 1.0]
     if len(ws_message_counts[id(ws)]) >= max_per_second:
         return True
@@ -156,9 +168,12 @@ def is_rate_limited(ws, max_per_second=10):
     return False
 
 # ── WebSocket Handler ─────────────────────────────────────────────────────────
-async def ws_handler(websocket):
-    current_room = None
-    player_color = None
+async def ws_handler(websocket, path=None):
+    # P1: Enforce ALLOWED_ORIGINS validation
+    origin = getattr(websocket, "request_headers", {}).get("Origin", "")
+    if origin and not is_origin_allowed(origin):
+        await websocket.close(1008, "Origin not allowed")
+        return
 
     try:
         async for raw_msg in websocket:
@@ -178,6 +193,7 @@ async def ws_handler(websocket):
                 continue
 
             action = data.get("action")
+            current_room = ws_to_room.get(websocket)
 
             # 1. CREATE CUSTOM ROOM
             if action == "create_room":
@@ -200,7 +216,7 @@ async def ws_handler(websocket):
                 room = GameRoom(room_id, time_control=time_ctl, host_color=pref_col)
                 player_color = room.assign_player(websocket, name)
                 rooms[room_id] = room
-                current_room = room
+                ws_to_room[websocket] = room
 
                 await websocket.send(json.dumps({
                     "type": "room_created",
@@ -231,7 +247,7 @@ async def ws_handler(websocket):
                     continue
 
                 player_color = room.assign_player(websocket, name)
-                current_room = room
+                ws_to_room[websocket] = room
                 room.start_game()
 
                 # Notify both players
@@ -246,7 +262,7 @@ async def ws_handler(websocket):
                     "turn": "w"
                 })
 
-            # 3. QUICK MATCH (GHÉP TRẬN NHANH)
+            # 3. QUICK MATCH (GHÉP TRẬN NHANH - P0-5 FIX)
             elif action == "quick_match":
                 try:
                     time_ctl = int(data.get("time_control", 300))
@@ -256,12 +272,12 @@ async def ws_handler(websocket):
                     time_ctl = 300
                 name = str(data.get("name", "Người chơi"))[:25]
 
-                # Clean any previous entry of this socket from queue
+                # Clean previous entries of this socket from queue
                 for q in list(quick_queue):
                     if q[0] == websocket:
                         quick_queue.remove(q)
 
-                # Check if someone else is waiting in queue
+                # Check if someone else is waiting
                 matched = None
                 for item in list(quick_queue):
                     other_ws, other_time, other_name = item
@@ -276,10 +292,12 @@ async def ws_handler(websocket):
                     room = GameRoom(room_id, time_control=time_ctl, host_color="random")
                     
                     room.assign_player(other_ws, other_name)
-                    c2 = room.assign_player(websocket, name)
+                    room.assign_player(websocket, name)
                     rooms[room_id] = room
-                    current_room = room
-                    player_color = c2
+                    
+                    # P0-5: Map BOTH sockets to the room instance
+                    ws_to_room[other_ws] = room
+                    ws_to_room[websocket] = room
                     room.start_game()
 
                     await room.broadcast({
@@ -299,9 +317,21 @@ async def ws_handler(websocket):
                         "message": "Đang tìm kiếm đối thủ xứng tầm..."
                     }))
 
-            # 4. MOVE PIECE (AUTHORITATIVE SERVER-SIDE CHESS VALIDATION)
+            # 4. MOVE PIECE (P0-6: update_clock BEFORE MOVE, AUTHORITATIVE VALIDATION)
             elif action == "move":
                 if not current_room or current_room.status != "playing":
+                    continue
+
+                # P0-6: Update clock before processing move
+                timeout_winner = current_room.update_clock()
+                if timeout_winner:
+                    await current_room.broadcast({
+                        "type": "game_over",
+                        "reason": "timeout",
+                        "winner": timeout_winner,
+                        "white_time": current_room.white_time,
+                        "black_time": current_room.black_time
+                    })
                     continue
 
                 player_col = current_room.get_color(websocket)
@@ -356,7 +386,7 @@ async def ws_handler(websocket):
                 # Check game termination conditions
                 if current_room.board.is_checkmate():
                     current_room.status = "ended"
-                    winner = player_col # player who just made the checkmating move
+                    winner = player_col
                     await current_room.broadcast({
                         "type": "game_over",
                         "reason": "checkmate",
@@ -454,7 +484,6 @@ async def ws_handler(websocket):
                 current_room.rematch_votes.add(websocket)
                 opp_ws = current_room.get_opponent(websocket)
                 if len(current_room.rematch_votes) == 2:
-                    # Swap colors and start fresh
                     current_room.white_ws, current_room.black_ws = current_room.black_ws, current_room.white_ws
                     current_room.white_name, current_room.black_name = current_room.black_name, current_room.white_name
                     current_room.rematch_votes.clear()
@@ -479,22 +508,22 @@ async def ws_handler(websocket):
         pass
     finally:
         ws_message_counts.pop(id(websocket), None)
-        # Cleanup on disconnect
+        room = ws_to_room.pop(websocket, None)
+
         for q in list(quick_queue):
             if q[0] == websocket:
                 quick_queue.remove(q)
 
-        if current_room:
-            opp_ws = current_room.get_opponent(websocket)
+        if room:
+            opp_ws = room.get_opponent(websocket)
             if opp_ws and not opp_ws.closed:
                 await opp_ws.send(json.dumps({
                     "type": "opponent_disconnected",
                     "message": "Đối thủ đã mất kết nối!"
                 }))
-            # If both disconnected, clean room
-            if (not current_room.white_ws or current_room.white_ws.closed) and \
-               (not current_room.black_ws or current_room.black_ws.closed):
-                rooms.pop(current_room.room_id, None)
+            if (not room.white_ws or room.white_ws.closed) and \
+               (not room.black_ws or room.black_ws.closed):
+                rooms.pop(room.room_id, None)
 
 # ── Timer Background Loop ─────────────────────────────────────────────────────
 async def timer_loop():
@@ -512,7 +541,6 @@ async def timer_loop():
                         "black_time": room.black_time
                     })
                 else:
-                    # Sync clock every second
                     await room.broadcast({
                         "type": "time_sync",
                         "white_time": room.white_time,
@@ -558,11 +586,9 @@ def run_http_server():
 
 # ── Main Entrypoint ───────────────────────────────────────────────────────────
 async def main():
-    # Start HTTP server thread
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
 
-    # Start WebSocket Server & Timer loop
     async with websockets.serve(ws_handler, "0.0.0.0", WS_PORT):
         print(f"⚡ Authoritative WebSocket Server running on ws://localhost:{WS_PORT}")
         await timer_loop()

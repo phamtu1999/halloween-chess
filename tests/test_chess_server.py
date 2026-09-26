@@ -33,19 +33,16 @@ class TestChessLogicAndRules(unittest.TestCase):
 
     def test_legal_moves(self):
         """Test standard legal chess moves (e2e4 -> e7e5 -> g1f3)"""
-        # White moves e2e4
         m1 = chess.Move.from_uci("e2e4")
         self.assertIn(m1, self.room.board.legal_moves)
         self.room.board.push(m1)
         self.assertEqual(self.room.turn, "b")
 
-        # Black moves e7e5
         m2 = chess.Move.from_uci("e7e5")
         self.assertIn(m2, self.room.board.legal_moves)
         self.room.board.push(m2)
         self.assertEqual(self.room.turn, "w")
 
-        # White moves g1f3
         m3 = chess.Move.from_uci("g1f3")
         self.assertIn(m3, self.room.board.legal_moves)
         self.room.board.push(m3)
