@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Halloween 3D Chess — Cờ Vua Ma Quái</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎃</text></svg>">
+  <style>
+    :root {
+      --bg: #0b0710;
+      --panel-bg: rgba(18, 11, 26, 0.92);
+      --gold: #f4c042;
+      --orange: #ff7b1a;
+      --purple: #a842f4;
+      --cyan: #2bf4c3;
+      --red: #f42b42;
+      --text: #f0e6f8;
+      --card-bg: rgba(28, 16, 42, 0.7);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #webgl-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* UI Overlay Grid */
+    #ui-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 10;
+      pointer-events: none;
+      display: grid;
+      grid-template-columns: 320px 1fr 340px;
+      grid-template-rows: 64px 1fr;
+      padding: 12px;
+      gap: 12px;
+    }
+
+    .interactive { pointer-events: auto; }
+
+    /* Top Bar Header */
+    header {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--panel-bg);
+      border: 1px solid rgba(244, 192, 66, 0.25);
+      border-radius: 12px;
+      padding: 6px 18px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(168, 66, 244, 0.15);
+      backdrop-filter: blur(12px);
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title-group h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: linear-gradient(135deg, #ffe082, #ff7b1a, #a842f4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .turn-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.3s;
+    }
+
+    .turn-badge.white { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 15px rgba(43, 244, 195, 0.3); }
+    .turn-badge.black { border-color: var(--orange); color: var(--orange); box-shadow: 0 0 15px rgba(255, 123, 26, 0.3); }
+    .turn-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+
+    /* Chess Clocks */
+    .clock-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chess-clock {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 4px 12px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 14px;
+      font-weight: 800;
+      transition: all 0.3s;
+    }
+
+    .chess-clock.active-w { border-color: var(--cyan); box-shadow: 0 0 12px rgba(43, 244, 195, 0.4); color: var(--cyan); }
+    .chess-clock.active-b { border-color: var(--orange); box-shadow: 0 0 12px rgba(255, 123, 26, 0.4); color: var(--orange); }
+    .chess-clock.low-time { border-color: var(--red) !important; color: var(--red) !important; animation: pulseAlert 0.8s infinite alternate; }
+
+    @keyframes pulseAlert {
+      from { box-shadow: 0 0 5px var(--red); }
+      to { box-shadow: 0 0 20px var(--red); }
+    }
+
+    .btn-bar { display: flex; gap: 6px; }
+
+    button {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid rgba(244, 192, 66, 0.3);
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: rgba(244, 192, 66, 0.2);
+      border-color: var(--gold);
+      box-shadow: 0 0 12px rgba(244, 192, 66, 0.3);
+      transform: translateY(-1px);
+    }
+
+    button:active { transform: translateY(1px); }
+
+    button.primary {
+      background: linear-gradient(135deg, rgba(255, 123, 26, 0.35), rgba(168, 66, 244, 0.35));
+      border-color: var(--orange);
+    }
+    button.primary:hover {
+      background: linear-gradient(135deg, rgba(255, 123, 26, 0.55), rgba(168, 66, 244, 0.55));
+    }
+
+    button.danger {
+      background: rgba(244, 43, 66, 0.2);
+      border-color: var(--red);
+    }
+    button.danger:hover {
+      background: rgba(244, 43, 66, 0.4);
+      box-shadow: 0 0 12px rgba(244, 43, 66, 0.4);
+    }
+
+    /* Left Sidebar */
+    .sidebar {
+      background: var(--panel-bg);
+      border: 1px solid rgba(244, 192, 66, 0.2);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(12px);
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+    }
+
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--gold);
+      border-bottom: 1px solid rgba(244, 192, 66, 0.2);
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .mode-select {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 4px;
+    }
+
+    .mode-btn {
+      padding: 8px 4px;
+      text-align: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, rgba(255, 123, 26, 0.4), rgba(168, 66, 244, 0.4));
+      border-color: var(--orange);
+      box-shadow: 0 0 12px rgba(255, 123, 26, 0.35);
+    }
+
+    /* ── REDESIGNED AI LICH KING SECTION ── */
+    #ai-panel {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(168, 66, 244, 0.3);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ai-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(168, 66, 244, 0.15);
+      border: 1px solid rgba(168, 66, 244, 0.4);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #e9d5ff;
+    }
+
+    .ai-status-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--purple);
+      box-shadow: 0 0 8px var(--purple);
+      animation: aiPulse 1.2s infinite alternate;
+    }
+
+    @keyframes aiPulse {
+      from { transform: scale(0.8); opacity: 0.5; }
+      to { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px var(--cyan); }
+    }
+
+    /* Difficulty Cards */
+    .diff-cards-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+
+    .diff-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--card-bg);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .diff-card:hover {
+      background: rgba(244, 192, 66, 0.15);
+      border-color: var(--gold);
+    }
+
+    .diff-card.active {
+      background: linear-gradient(90deg, rgba(255, 123, 26, 0.3), rgba(168, 66, 244, 0.3));
+      border-color: var(--orange);
+      box-shadow: 0 0 10px rgba(255, 123, 26, 0.3);
+    }
+
+    .diff-card-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      text-align: left;
+    }
+
+    .diff-card-title {
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diff-card-desc {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Player Side Select in AI */
+    .side-select-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .side-btn {
+      padding: 6px;
+      font-size: 11px;
+      justify-content: center;
+    }
+
+    .side-btn.active {
+      background: rgba(43, 244, 195, 0.25);
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    /* Hint / Undo Row */
+    .ai-action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    /* ── REDESIGNED ONLINE WEBSOCKET SECTION ── */
+    #online-panel {
+      display: none;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(168, 66, 244, 0.3);
+      border-radius: 10px;
+      padding: 10px;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .online-status-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      text-align: center;
+    }
+
+    .form-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-label {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    select, input[type="text"] {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(244, 192, 66, 0.3);
+      border-radius: 6px;
+      color: #fff;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus, input[type="text"]:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 8px rgba(244, 192, 66, 0.3);
+    }
+
+    .btn-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .camera-presets {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+    }
+
+    .camera-presets button {
+      padding: 6px 2px;
+      font-size: 10px;
+      justify-content: center;
+    }
+
+    .emotes-bar {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .emote-btn {
+      flex: 1;
+      font-size: 18px;
+      padding: 6px 0;
+      justify-content: center;
+    }
+
+    /* Right Sidebar */
+    .graveyard-panel {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .graveyard-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 15px;
+      flex-wrap: wrap;
+    }
+
+    .graveyard-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.5);
+      width: 45px;
+    }
+
+    .move-history {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      padding: 8px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 160px;
+    }
+
+    .move-row {
+      display: grid;
+      grid-template-columns: 26px 1fr 1fr;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    .move-row:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+    .move-num { color: rgba(255, 255, 255, 0.4); }
+    .move-w { color: var(--cyan); }
+    .move-b { color: var(--orange); }
+
+    /* In-game Chat */
+    .chat-panel {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      height: 130px;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .chat-msg { padding: 2px 4px; border-radius: 4px; word-break: break-all; }
+    .chat-msg.me { color: var(--cyan); background: rgba(43, 244, 195, 0.08); }
+    .chat-msg.opp { color: var(--orange); background: rgba(255, 123, 26, 0.08); }
+    .chat-msg.sys { color: var(--gold); font-style: italic; }
+
+    .chat-input-row { display: flex; gap: 4px; }
+    .chat-input { flex: 1; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; color: #fff; padding: 4px 6px; font-size: 11px; outline: none; }
+
+    /* ── TOAST NOTIFICATIONS ── */
+    #toast-container {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast-msg {
+      pointer-events: auto;
+      background: rgba(18, 11, 26, 0.95);
+      border: 1px solid var(--gold);
+      border-radius: 10px;
+      padding: 10px 18px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.8), 0 0 15px rgba(244, 192, 66, 0.3);
+      backdrop-filter: blur(12px);
+      animation: toastSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      transition: all 0.4s ease;
+    }
+
+    .toast-msg.success { border-color: var(--cyan); box-shadow: 0 0 15px rgba(43, 244, 195, 0.4); }
+    .toast-msg.error { border-color: var(--red); box-shadow: 0 0 15px rgba(244, 43, 66, 0.4); }
+    .toast-msg.info { border-color: var(--gold); }
+
+    @keyframes toastSlideIn {
+      from { transform: translateX(120%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* ── CUSTOM DIALOG MODAL (REPLACES PROMPT / CONFIRM / ALERT) ── */
+    #custom-dialog-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(4, 2, 8, 0.80);
+      backdrop-filter: blur(10px);
+      z-index: 10000;
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #custom-dialog-box {
+      background: rgba(22, 13, 34, 0.98);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 24px 30px;
+      width: 90%;
+      max-width: 440px;
+      box-shadow: 0 0 50px rgba(244, 192, 66, 0.35), 0 0 90px rgba(0, 0, 0, 0.95);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes popIn {
+      from { transform: scale(0.85); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    #dialog-title {
+      font-size: 20px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #ffe082, #ff7b1a);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    #dialog-message {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.85);
+      line-height: 1.5;
+    }
+
+    #dialog-input-container {
+      display: none;
+      margin: 4px 0;
+    }
+
+    #dialog-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid var(--gold);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--gold);
+      font-size: 18px;
+      font-weight: 800;
+      text-align: center;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      outline: none;
+      box-shadow: 0 0 15px rgba(244, 192, 66, 0.25);
+    }
+
+    #dialog-btn-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 6px;
+    }
+
+    /* Floating 3D Emote Bubbles */
+    .floating-emote {
+      position: absolute;
+      font-size: 38px;
+      pointer-events: none;
+      z-index: 50;
+      animation: floatUp 2.2s forwards cubic-bezier(0.1, 0.8, 0.3, 1);
+      filter: drop-shadow(0 0 15px rgba(255, 123, 26, 0.8));
+    }
+
+    @keyframes floatUp {
+      0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+      20% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+      80% { transform: translate(-50%, -150px) scale(1.0); opacity: 0.9; }
+      100% { transform: translate(-50%, -240px) scale(0.6); opacity: 0; }
+    }
+
+    /* Promotion / Game Over Modal */
+    #banner-modal {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(18, 11, 26, 0.95);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 24px 36px;
+      box-shadow: 0 0 60px rgba(244, 192, 66, 0.4), 0 0 100px rgba(0, 0, 0, 0.9);
+      text-align: center;
+      z-index: 100;
+      display: none;
+      backdrop-filter: blur(16px);
+      pointer-events: auto;
+      animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    #banner-title {
+      font-size: 24px;
+      font-weight: 800;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #ffe082, #ff7b1a);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    #banner-desc { font-size: 14px; color: rgba(255, 255, 255, 0.8); margin-bottom: 16px; }
+    .promo-choices { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+    .promo-btn { font-size: 22px; padding: 10px 14px; border-radius: 10px; }
+
+    /* Loading Screen */
+    #loading-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #08040d;
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 18px;
+      transition: opacity 0.5s ease;
+    }
+
+    .loader-pumpkin {
+      font-size: 50px;
+      animation: spookyBounce 1.2s infinite alternate ease-in-out;
+      filter: drop-shadow(0 0 20px #ff7b1a);
+    }
+
+    @keyframes spookyBounce {
+      from { transform: translateY(0) scale(1); }
+      to { transform: translateY(-16px) scale(1.06); filter: drop-shadow(0 0 30px #a842f4); }
+    }
+
+    .progress-bar-wrap {
+      width: 280px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid rgba(244, 192, 66, 0.3);
+    }
+
+    #progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #ff7b1a, #a842f4, #2bf4c3);
+      transition: width 0.2s;
+    }
+
+    #loading-text { font-size: 13px; color: rgba(255, 255, 255, 0.7); letter-spacing: 1px; }
+
+    @media (max-width: 900px) {
+      #ui-overlay {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto;
+        overflow-y: auto;
+      }
+      .sidebar { max-height: 240px; }
+    }
+  </style>
+
+  <!-- Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+</head>
+<body>
+
+  <canvas id="webgl-canvas"></canvas>
+
+  <div id="loading-screen">
+    <div class="loader-pumpkin">🎃</div>
+    <div class="progress-bar-wrap">
+      <div id="progress-bar"></div>
+    </div>
+    <div id="loading-text">Đang triệu hồi các quân cờ Ma Quái 3D...</div>
+  </div>
+
+  <div id="ui-overlay">
+    
+    <!-- Header -->
+    <header class="interactive">
+      <div class="title-group">
+        <h1>🎃 HALLOWEEN CHESS 3D</h1>
+        <div id="turn-display" class="turn-badge white">
+          <div class="turn-dot"></div>
+          <span id="turn-text">Lượt Trắng (Ghost Bone)</span>
+        </div>
+      </div>
+
+      <!-- Clocks -->
+      <div class="clock-group">
+        <div id="clock-white" class="chess-clock active-w" title="Thời gian Trắng">⚪ 05:00</div>
+        <div id="clock-black" class="chess-clock" title="Thời gian Đen">⚫ 05:00</div>
+      </div>
+
+      <div class="btn-bar">
+        <button id="btn-sound">🔊 Âm thanh</button>
+        <button id="btn-undo">↩ Đi lại</button>
+        <button id="btn-restart" class="primary">🔄 Ván mới</button>
+      </div>
+    </header>
+
+    <!-- Left Sidebar -->
+    <div class="sidebar interactive">
+      <div>
+        <div class="section-title">Chế độ chơi</div>
+        <div class="mode-select">
+          <button id="mode-ai" class="mode-btn active">🤖 Đấu AI</button>
+          <button id="mode-pvp" class="mode-btn">👥 2 Người</button>
+          <button id="mode-online" class="mode-btn">🌐 Online</button>
+        </div>
+      </div>
+
+      <!-- REDESIGNED AI LICH KING SECTION -->
+      <div id="ai-panel">
+        <div class="ai-banner">
+          <div class="ai-status-pulse"></div>
+          <span id="ai-status-text">Lich King sẵn sàng nghênh chiến</span>
+        </div>
+
+        <div class="form-row">
+          <span class="form-label">Phe của bạn:</span>
+          <div class="side-select-grid">
+            <button id="ai-side-white" class="side-btn active">⚪ Trắng (Đi trước)</button>
+            <button id="ai-side-black" class="side-btn">⚫ Đen (Đi sau)</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <span class="form-label">Cấp độ AI:</span>
+          <div class="diff-cards-grid">
+            <div class="diff-card" data-diff="1">
+              <div class="diff-card-info">
+                <div class="diff-card-title">🟢 Hồn Ma Tập Sự</div>
+                <div class="diff-card-desc">Đánh ngẫu nhiên, dễ thắng</div>
+              </div>
+            </div>
+            <div class="diff-card active" data-diff="2">
+              <div class="diff-card-info">
+                <div class="diff-card-title">🟡 Kỵ Sĩ Bóng Đêm</div>
+                <div class="diff-card-desc">Tính 2 nước, ăn quân tốt</div>
+              </div>
+            </div>
+            <div class="diff-card" data-diff="3">
+              <div class="diff-card-info">
+                <div class="diff-card-title">🔴 Chúa Tể Lich King</div>
+                <div class="diff-card-desc">Minimax chuyên sâu, chuẩn xác</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ai-action-row">
+          <button id="btn-ai-hint" class="primary" style="justify-content: center;">💡 Gợi ý nước</button>
+          <button id="btn-ai-undo" style="justify-content: center;">↩ Lùi 1 nước</button>
+        </div>
+      </div>
+
+      <!-- REDESIGNED ONLINE WEBSOCKET SECTION -->
+      <div id="online-panel">
+        <div id="online-status" class="online-status-badge" style="color: var(--gold);">
+          ⚪ Chưa kết nối máy chủ
+        </div>
+
+        <button id="btn-quick-match" class="primary" style="width: 100%; justify-content: center;">
+          ⚡ Ghép trận nhanh (1v1)
+        </button>
+
+        <div class="form-row">
+          <span class="form-label">Nickname của bạn:</span>
+          <input id="input-player-name" type="text" placeholder="Nhập tên của bạn..." maxlength="18" value="Dũng Sĩ">
+        </div>
+
+        <div class="form-row">
+          <span class="form-label">Thời gian ván đấu:</span>
+          <select id="select-time-control">
+            <option value="180">Cờ chớp (3 phút)</option>
+            <option value="300" selected>Tiêu chuẩn (5 phút)</option>
+            <option value="600">Cờ nhanh (10 phút)</option>
+            <option value="0">Không giới hạn (Casual)</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <span class="form-label">Chọn phe:</span>
+          <select id="select-color">
+            <option value="random" selected>🎲 Ngẫu nhiên</option>
+            <option value="w">⚪ Trắng (Ghost Bone)</option>
+            <option value="b">⚫ Đen (Obsidian Dark)</option>
+          </select>
+        </div>
+
+        <div class="btn-grid">
+          <button id="btn-create-room" class="primary" style="justify-content: center;">➕ Tạo phòng</button>
+          <button id="btn-join-modal" style="justify-content: center;">🔑 Vào mã</button>
+        </div>
+
+        <!-- Room Info Display -->
+        <div id="room-info-box" style="display: none; background: rgba(0,0,0,0.5); padding: 8px; border-radius: 6px; border: 1px dashed var(--gold);">
+          <div style="font-size: 10px; color: rgba(255,255,255,0.6);">MÃ PHÒNG:</div>
+          <div id="display-room-id" style="font-size: 16px; font-weight: 800; color: var(--gold); letter-spacing: 2px; margin: 2px 0;"></div>
+          <div style="display: flex; gap: 4px;">
+            <button id="btn-copy-link" style="flex: 1; padding: 4px; font-size: 10px; justify-content: center;">📋 Copy Link</button>
+            <button id="btn-copy-code" style="padding: 4px 8px; font-size: 10px; justify-content: center;">Mã</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- In-Game Action Bar -->
+      <div id="in-game-actions" style="display: none;">
+        <div class="section-title" style="color: var(--red);">Hành động ván đấu</div>
+        <div class="btn-grid">
+          <button id="btn-offer-draw" style="justify-content: center;">🤝 Xin hòa</button>
+          <button id="btn-resign" class="danger" style="justify-content: center;">🏳️ Đầu hàng</button>
+        </div>
+      </div>
+
+      <!-- Camera Presets -->
+      <div>
+        <div class="section-title">Góc nhìn Camera</div>
+        <div class="camera-presets">
+          <button id="cam-persp">🎮 Phối cảnh</button>
+          <button id="cam-top">🔝 Từ trên</button>
+          <button id="cam-white">⚪ Trắng</button>
+          <button id="cam-black">⚫ Đen</button>
+          <button id="cam-side">👁️ Cận cảnh</button>
+          <button id="cam-free">🔄 Tự do</button>
+        </div>
+      </div>
+
+      <!-- Emotes Bar -->
+      <div>
+        <div class="section-title">Biểu cảm ma quái</div>
+        <div class="emotes-bar">
+          <button class="emote-btn" data-emote="🎃" title="Haha">🎃</button>
+          <button class="emote-btn" data-emote="👻" title="Sợ hãi">👻</button>
+          <button class="emote-btn" data-emote="💀" title="Nguy hiểm">💀</button>
+          <button class="emote-btn" data-emote="🔥" title="Cháy quá">🔥</button>
+        </div>
+      </div>
+    </div>
+
+    <div></div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar interactive">
+      <div>
+        <div class="section-title">Nghĩa địa Quân cờ đã bắt</div>
+        <div class="graveyard-panel">
+          <div class="graveyard-row">
+            <span class="graveyard-label">Trắng:</span>
+            <span id="captured-white"></span>
+          </div>
+          <div class="graveyard-row">
+            <span class="graveyard-label">Đen:</span>
+            <span id="captured-black"></span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; flex: 1;">
+        <div class="section-title">Nhật ký nước đi</div>
+        <div id="move-history" class="move-history"></div>
+      </div>
+
+      <div id="chat-section" style="display: none; flex-direction: column;">
+        <div class="section-title" style="color: var(--cyan);">Trò chuyện trận đấu</div>
+        <div class="chat-panel">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input-row">
+            <input id="chat-input" class="chat-input" placeholder="Nhập tin nhắn..." maxlength="100">
+            <button id="btn-send-chat" style="padding: 4px 8px; font-size: 11px;">Gửi</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- CUSTOM HALLOWEEN DIALOG OVERLAY (REPLACES BROWSER PROMPT/CONFIRM/ALERT) -->
+  <div id="custom-dialog-overlay">
+    <div id="custom-dialog-box">
+      <div id="dialog-title">🔑 THAM GIA PHÒNG ĐẤU</div>
+      <div id="dialog-message">Nhập mã phòng cờ 6 ký tự để tham chiến:</div>
+      <div id="dialog-input-container">
+        <input id="dialog-input" type="text" placeholder="HLW-XXXX" maxlength="12">
+      </div>
+      <div id="dialog-btn-row">
+        <button id="dialog-cancel-btn" style="padding: 8px 18px;">Hủy bỏ</button>
+        <button id="dialog-confirm-btn" class="primary" style="padding: 8px 22px;">Xác nhận</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Promotion / Victory Modal -->
+  <div id="banner-modal">
+    <div id="banner-title">CHIẾN THẮNG!</div>
+    <div id="banner-desc">Trắng đã chiếu bí Đen</div>
+    <div id="promo-container" class="promo-choices" style="display: none;">
+      <button class="promo-btn" data-piece="q">👑 Hậu</button>
+      <button class="promo-btn" data-piece="r">🏰 Xe</button>
+      <button class="promo-btn" data-piece="b">🧙 Tượng</button>
+      <button class="promo-btn" data-piece="n">🐴 Mã</button>
+    </div>
+    <div id="modal-btn-row" style="display: flex; gap: 8px; justify-content: center;">
+      <button id="banner-ok-btn" class="primary" style="padding: 8px 20px;">OK</button>
+      <button id="banner-rematch-btn" class="primary" style="display: none; padding: 8px 20px;">🔄 Yêu cầu tái đấu</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
