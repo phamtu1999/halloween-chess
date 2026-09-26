@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Halloween 3D Chess — Cờ Vua Ma Quái</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎃</text></svg>">
   <style>
@@ -18,7 +18,7 @@
       --card-bg: rgba(28, 16, 42, 0.7);
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
 
     body {
       background: var(--bg);
@@ -27,6 +27,7 @@
       overflow: hidden;
       width: 100vw;
       height: 100vh;
+      height: 100dvh;
     }
 
     #webgl-canvas {
@@ -45,7 +46,7 @@
       left: 0;
       width: 100%;
       height: 100%;
-      z-index: 10;
+      z-index: 20;
       pointer-events: none;
       display: grid;
       grid-template-columns: 320px 1fr 340px;
@@ -68,6 +69,7 @@
       padding: 6px 18px;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(168, 66, 244, 0.15);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
     }
 
     .title-group {
@@ -186,6 +188,7 @@
       gap: 10px;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       max-height: calc(100vh - 100px);
       overflow-y: auto;
     }
@@ -222,7 +225,7 @@
       box-shadow: 0 0 12px rgba(255, 123, 26, 0.35);
     }
 
-    /* ── REDESIGNED AI LICH KING SECTION ── */
+    /* AI Lich King Section */
     #ai-panel {
       background: rgba(0, 0, 0, 0.4);
       border: 1px solid rgba(168, 66, 244, 0.3);
@@ -335,7 +338,7 @@
       gap: 6px;
     }
 
-    /* ── REDESIGNED ONLINE WEBSOCKET SECTION ── */
+    /* Online Panel */
     #online-panel {
       display: none;
       background: rgba(0, 0, 0, 0.4);
@@ -496,7 +499,7 @@
     .chat-input-row { display: flex; gap: 4px; }
     .chat-input { flex: 1; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; color: #fff; padding: 4px 6px; font-size: 11px; outline: none; }
 
-    /* ── TOAST NOTIFICATIONS ── */
+    /* Toast Notifications */
     #toast-container {
       position: fixed;
       top: 80px;
@@ -522,6 +525,7 @@
       gap: 10px;
       box-shadow: 0 8px 25px rgba(0, 0, 0, 0.8), 0 0 15px rgba(244, 192, 66, 0.3);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       animation: toastSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       transition: all 0.4s ease;
     }
@@ -535,7 +539,7 @@
       to { transform: translateX(0); opacity: 1; }
     }
 
-    /* ── CUSTOM DIALOG MODAL (REPLACES PROMPT / CONFIRM / ALERT) ── */
+    /* Custom Dialog Modal */
     #custom-dialog-overlay {
       position: fixed;
       top: 0;
@@ -544,6 +548,7 @@
       height: 100vh;
       background: rgba(4, 2, 8, 0.80);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       z-index: 10000;
       display: none;
       justify-content: center;
@@ -629,7 +634,7 @@
       100% { transform: translate(-50%, -240px) scale(0.6); opacity: 0; }
     }
 
-    /* Promotion / Game Over Modal */
+    /* Promotion / Victory Modal */
     #banner-modal {
       position: absolute;
       top: 50%;
@@ -641,9 +646,10 @@
       padding: 24px 36px;
       box-shadow: 0 0 60px rgba(244, 192, 66, 0.4), 0 0 100px rgba(0, 0, 0, 0.9);
       text-align: center;
-      z-index: 100;
+      z-index: 10000;
       display: none;
       backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       pointer-events: auto;
       animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
@@ -707,7 +713,7 @@
 
     #loading-text { font-size: 13px; color: rgba(255, 255, 255, 0.7); letter-spacing: 1px; }
 
-    /* Mobile Drawer Components (Hidden on Desktop) */
+    /* Mobile Drawer Components (Hidden by default on Desktop) */
     .mobile-nav-btn { display: none; }
     .drawer-header-mobile { display: none; }
     #mobile-backdrop { display: none; }
@@ -728,9 +734,12 @@
 
       #ui-overlay {
         display: block;
+        position: fixed;
+        inset: 0;
         padding: 0;
         pointer-events: none;
         overflow: hidden;
+        z-index: 20;
       }
 
       /* Backdrop for active drawers */
@@ -738,10 +747,10 @@
         display: block;
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.65);
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
-        z-index: 40;
+        background: rgba(4, 2, 8, 0.72);
+        backdrop-filter: blur(5px);
+        -webkit-backdrop-filter: blur(5px);
+        z-index: 30;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -758,14 +767,14 @@
         top: max(8px, env(safe-area-inset-top, 8px));
         left: 8px;
         right: 8px;
-        z-index: 30;
+        z-index: 35;
         padding: 6px 10px;
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: 6px;
         border-radius: 12px;
-        background: rgba(18, 11, 26, 0.92);
+        background: rgba(18, 11, 26, 0.94);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(244, 192, 66, 0.25);
@@ -845,13 +854,13 @@
         bottom: 0;
         width: 100%;
         max-width: 100vw;
-        max-height: 78vh;
-        max-height: 78dvh;
+        max-height: 82vh;
+        max-height: 82dvh;
         border-radius: 20px 20px 0 0;
-        background: rgba(18, 11, 26, 0.97);
-        border: 1px solid rgba(244, 192, 66, 0.35);
+        background: rgba(18, 11, 26, 0.98);
+        border: 1.5px solid var(--gold);
         border-bottom: none;
-        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.85), 0 0 30px rgba(168, 66, 244, 0.2);
+        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.95), 0 0 30px rgba(168, 66, 244, 0.35);
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
         z-index: 50;
@@ -859,12 +868,14 @@
         transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         pointer-events: auto;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
         padding: 16px;
-        padding-bottom: max(24px, env(safe-area-inset-bottom, 24px));
+        padding-bottom: max(28px, env(safe-area-inset-bottom, 28px));
       }
 
       .sidebar.drawer-open {
-        transform: translateY(0);
+        transform: translateY(0) !important;
+        pointer-events: auto !important;
       }
 
       .drawer-header-mobile {
@@ -872,8 +883,8 @@
         justify-content: space-between;
         align-items: center;
         padding-bottom: 10px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid rgba(244, 192, 66, 0.25);
+        margin-bottom: 12px;
+        border-bottom: 1px solid rgba(244, 192, 66, 0.3);
       }
 
       .drawer-title {
@@ -885,19 +896,18 @@
       }
 
       .drawer-close-btn {
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(244, 43, 66, 0.2);
+        border: 1px solid var(--red);
         color: #fff;
-        padding: 4px 10px;
-        border-radius: 6px;
+        padding: 5px 12px;
+        border-radius: 8px;
         font-size: 11px;
         font-weight: 700;
         cursor: pointer;
       }
 
       .drawer-close-btn:hover {
-        background: rgba(244, 43, 66, 0.3);
-        border-color: var(--red);
+        background: rgba(244, 43, 66, 0.4);
       }
 
       /* Floating Bottom Quick Action Bar */
@@ -907,7 +917,7 @@
         bottom: max(12px, env(safe-area-inset-bottom, 12px));
         left: 50%;
         transform: translateX(-50%);
-        z-index: 25;
+        z-index: 35;
         gap: 6px;
         padding: 5px 8px;
         background: rgba(18, 11, 26, 0.88);
@@ -1027,10 +1037,11 @@
     <div id="loading-text">Đang triệu hồi các quân cờ Ma Quái 3D...</div>
   </div>
 
-  <div id="mobile-backdrop"></div>
-
   <div id="ui-overlay">
     
+    <!-- Mobile Backdrop inside overlay -->
+    <div id="mobile-backdrop"></div>
+
     <!-- Header -->
     <header class="interactive">
       <div class="title-group">
@@ -1072,7 +1083,7 @@
         </div>
       </div>
 
-      <!-- REDESIGNED AI LICH KING SECTION -->
+      <!-- AI Lich King Section -->
       <div id="ai-panel">
         <div class="ai-banner">
           <div class="ai-status-pulse"></div>
@@ -1117,7 +1128,7 @@
         </div>
       </div>
 
-      <!-- REDESIGNED ONLINE WEBSOCKET SECTION -->
+      <!-- Online WebSocket Section -->
       <div id="online-panel">
         <div id="online-status" class="online-status-badge" style="color: var(--gold);">
           ⚪ Chưa kết nối máy chủ
@@ -1241,22 +1252,22 @@
       </div>
     </div>
 
-  </div>
+    <!-- Mobile Floating Quick Bottom Bar -->
+    <div id="mobile-bottom-bar" class="interactive">
+      <button class="m-bar-btn" id="m-cam-persp">🎮 3D</button>
+      <button class="m-bar-btn" id="m-cam-top">🔝 2D</button>
+      <button class="m-bar-btn" id="m-cam-white">⚪ Trắng</button>
+      <button class="m-bar-btn" id="m-cam-black">⚫ Đen</button>
+      <button class="m-bar-btn primary" id="m-btn-hint">💡 Gợi ý</button>
+      <button class="m-bar-btn" id="m-btn-menu">⚙️ Menu</button>
+    </div>
 
-  <!-- Mobile Floating Quick Bottom Bar -->
-  <div id="mobile-bottom-bar" class="interactive">
-    <button class="m-bar-btn" id="m-cam-persp">🎮 3D</button>
-    <button class="m-bar-btn" id="m-cam-top">🔝 2D</button>
-    <button class="m-bar-btn" id="m-cam-white">⚪ Trắng</button>
-    <button class="m-bar-btn" id="m-cam-black">⚫ Đen</button>
-    <button class="m-bar-btn primary" id="m-btn-hint">💡 Gợi ý</button>
-    <button class="m-bar-btn" id="m-btn-menu">⚙️ Menu</button>
   </div>
 
   <!-- Toast Container -->
   <div id="toast-container"></div>
 
-  <!-- CUSTOM HALLOWEEN DIALOG OVERLAY (REPLACES BROWSER PROMPT/CONFIRM/ALERT) -->
+  <!-- Custom Dialog Modal -->
   <div id="custom-dialog-overlay">
     <div id="custom-dialog-box">
       <div id="dialog-title">🔑 THAM GIA PHÒNG ĐẤU</div>
