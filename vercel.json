@@ -36,7 +36,7 @@
       ]
     },
     {
-      "source": "/models 3d glb/:path*",
+      "source": "/(.*\\.glb)",
       "headers": [
         {
           "key": "Cache-Control",
